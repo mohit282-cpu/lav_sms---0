@@ -10,4 +10,7 @@
 <li class="nav-item">
     <a href="{{ route('attendance.student_history', $studentRec->id) }}" class="nav-link {{ Route::is('attendance.student_history') ? 'active' : '' }}"><i class="icon-user-check"></i> {{ __('My Attendance') }}</a>
 </li>
+<li class="nav-item">
+    <a href="{{ route('fees.ledger.show', Auth::user()->id) }}" class="nav-link {{ in_array(Route::currentRouteName(), ['fees.ledger.show', 'fees.invoices.show', 'fees.receipts.show']) ? 'active' : '' }}"><i class="icon-cash"></i> {{ __('My Fee Ledger') }}</a>
+</li>
 @endif

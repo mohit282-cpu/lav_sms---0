@@ -181,5 +181,22 @@
     "Excellent": "उत्कृष्ट",
     "Very Good": "धेरै राम्रो",
     "Good": "राम्रो",
-    "Poor": "कमजोर"
+    "Poor": "कमजोर",
+
+    "Fee Management": "शुल्क व्यवस्थापन",
+    "Fee Structures": "शुल्क संरचना तथा दर",
+    "Fee Structures & Schedules": "शुल्क संरचना तथा दर तालिका",
+    "Fee Invoices": "शुल्क बिजकहरू",
+    "Student Fee Invoices": "विद्यार्थी शुल्क बिजकहरू",
+    "Generate Invoices": "शुल्क बिजक जारी गर्नुहोस्",
+    "Fee Collections / Receipts": "शुल्क असुली तथा रसिदहरू",
+    "Fee Payment Collections & Receipts": "शुल्क असुली तथा रसिद विवरण",
+    "Student Fee Ledger": "विद्यार्थी शुल्क खाता (लेजर)",
+    "Student Fee Ledger & Account Statements": "विद्यार्थी शुल्क खाता तथा स्टेटमेन्ट",
+    "Discounts & Refunds": "छुट, मिनाहा तथा फिर्ता",
+    "Discounts, Waivers & Refunds Audit": "छुट, मिनाहा तथा फिर्ता अडिट लग",
+    "Financial Reports": "वित्तीय तथा असुली प्रतिवेदन",
+    "Official Payment Receipt": "आधिकारिक शुल्क भुक्तानी रसिद",
+    "Record Fee Payment": "शुल्क भुक्तानी प्रविष्ट गर्नुहोस्",
+    "My Fee Ledger": "मेरो शुल्क खाता"
 }

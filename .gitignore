@@ -16,3 +16,4 @@ storage
 .phpstorm.meta.php
 .editorconfig
 /database/backups
+*.sql

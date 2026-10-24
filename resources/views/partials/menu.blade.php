@@ -71,17 +71,20 @@
 
                         <ul class="nav nav-group-sub" data-submenu-title="{{ __('Administrative') }}">
 
-                            {{--Payments--}}
+                            {{--Fees & Accounting (Nepal BS)--}}
                             @if(Qs::userIsTeamAccount())
-                            <li class="nav-item nav-item-submenu {{ in_array(Route::currentRouteName(), ['payments.index', 'payments.create', 'payments.edit', 'payments.manage', 'payments.show', 'payments.invoice']) ? 'nav-item-expanded' : '' }}">
+                            <li class="nav-item nav-item-submenu {{ in_array(Route::currentRouteName(), ['fees.structures.index', 'fees.invoices.index', 'fees.invoices.create', 'fees.invoices.show', 'fees.payments.index', 'fees.payments.create', 'fees.receipts.show', 'fees.ledger.index', 'fees.ledger.show', 'fees.adjustments.index', 'fees.adjustments.create', 'fees.reports.index', 'payments.index', 'payments.create', 'payments.edit', 'payments.manage', 'payments.show', 'payments.invoice']) ? 'nav-item-expanded nav-item-open' : '' }}">
 
-                                <a href="#" class="nav-link {{ in_array(Route::currentRouteName(), ['payments.index', 'payments.edit', 'payments.create', 'payments.manage', 'payments.show', 'payments.invoice']) ? 'active' : '' }}">{{ __('Payments') }}</a>
+                                <a href="#" class="nav-link {{ in_array(Route::currentRouteName(), ['fees.structures.index', 'fees.invoices.index', 'fees.invoices.create', 'fees.invoices.show', 'fees.payments.index', 'fees.payments.create', 'fees.receipts.show', 'fees.ledger.index', 'fees.ledger.show', 'fees.adjustments.index', 'fees.adjustments.create', 'fees.reports.index', 'payments.index', 'payments.edit', 'payments.create', 'payments.manage', 'payments.show', 'payments.invoice']) ? 'active' : '' }}"><i class="icon-cash"></i> <span>{{ __('Fee Management') }}</span></a>
 
                                 <ul class="nav nav-group-sub">
-                                    <li class="nav-item"><a href="{{ route('payments.create') }}" class="nav-link {{ Route::is('payments.create') ? 'active' : '' }}">{{ __('Create Payment') }}</a></li>
-                                    <li class="nav-item"><a href="{{ route('payments.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['payments.index', 'payments.edit', 'payments.show']) ? 'active' : '' }}">{{ __('Manage Payments') }}</a></li>
-                                    <li class="nav-item"><a href="{{ route('payments.manage') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['payments.manage', 'payments.invoice', 'payments.receipts']) ? 'active' : '' }}">{{ __('Student Payments') }}</a></li>
-
+                                    <li class="nav-item"><a href="{{ route('fees.invoices.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['fees.invoices.index', 'fees.invoices.create', 'fees.invoices.show']) ? 'active' : '' }}">{{ __('Fee Invoices') }}</a></li>
+                                    <li class="nav-item"><a href="{{ route('fees.payments.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['fees.payments.index', 'fees.payments.create', 'fees.receipts.show']) ? 'active' : '' }}">{{ __('Fee Collections / Receipts') }}</a></li>
+                                    <li class="nav-item"><a href="{{ route('fees.structures.index') }}" class="nav-link {{ Route::is('fees.structures.index') ? 'active' : '' }}">{{ __('Fee Structures') }}</a></li>
+                                    <li class="nav-item"><a href="{{ route('fees.ledger.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['fees.ledger.index', 'fees.ledger.show']) ? 'active' : '' }}">{{ __('Student Fee Ledger') }}</a></li>
+                                    <li class="nav-item"><a href="{{ route('fees.adjustments.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['fees.adjustments.index', 'fees.adjustments.create']) ? 'active' : '' }}">{{ __('Discounts & Refunds') }}</a></li>
+                                    <li class="nav-item"><a href="{{ route('fees.reports.index') }}" class="nav-link {{ Route::is('fees.reports.index') ? 'active' : '' }}">{{ __('Financial Reports') }}</a></li>
+                                    <li class="nav-item"><a href="{{ route('payments.manage') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['payments.manage', 'payments.index', 'payments.create']) ? 'active' : '' }}">{{ __('Legacy Payments') }}</a></li>
                                 </ul>
 
                             </li>
