@@ -14,24 +14,33 @@
 
     <div class="collapse navbar-collapse" id="navbar-mobile">
         <ul class="navbar-nav ml-auto">
+            {{-- Language Switcher --}}
+            <li class="nav-item dropdown mr-md-2">
+                <a href="#" class="navbar-nav-link dropdown-toggle" data-toggle="dropdown">
+                    <i class="icon-earth mr-1"></i>
+                    <span>{{ app()->getLocale() == 'ne' ? 'नेपाली' : 'English' }}</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right language-switcher-dropdown">
+                    <a href="{{ route('set_locale', 'ne') }}" class="dropdown-item {{ app()->getLocale() == 'ne' ? 'active' : '' }}">
+                        <i class="icon-check {{ app()->getLocale() == 'ne' ? '' : 'invisible' }}"></i> नेपाली (Nepali)
+                    </a>
+                    <a href="{{ route('set_locale', 'en') }}" class="dropdown-item {{ app()->getLocale() == 'en' ? 'active' : '' }}">
+                        <i class="icon-check {{ app()->getLocale() == 'en' ? '' : 'invisible' }}"></i> English
+                    </a>
+                </div>
+            </li>
+
             <li class="nav-item dropdown">
                 <a href="{{ route('home') }}" class="navbar-nav-link">
                     <i class="icon-home"></i>
-                    <span class="d-md-none ml-2">Home</span>
+                    <span class="d-md-none ml-2">{{ __('Dashboard') }}</span>
                 </a>
             </li>
 
             <li class="nav-item dropdown">
                 <a href="{{ route('login') }}" class="navbar-nav-link">
                     <i class="icon-user-tie"></i>
-                    <span class="d-md-none ml-2">My Account</span>
-                </a>
-            </li>
-
-            <li class="nav-item dropdown">
-                <a href="#" class="navbar-nav-link">
-                    <i class="icon-cog3"></i>
-                    <span class="d-md-none ml-2">Options</span>
+                    <span class="d-md-none ml-2">{{ __('Sign in') }}</span>
                 </a>
             </li>
         </ul>

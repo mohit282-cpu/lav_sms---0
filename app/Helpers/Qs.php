@@ -360,7 +360,30 @@ class Qs
 
     public static function getDaysOfTheWeek()
     {
-        return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        return [
+            __('Monday'),
+            __('Tuesday'),
+            __('Wednesday'),
+            __('Thursday'),
+            __('Friday'),
+            __('Saturday'),
+            __('Sunday'),
+        ];
+    }
+
+    public static function formatNumber($number, $useDevanagari = null)
+    {
+        return NepaliHelper::formatNumber($number, $useDevanagari);
+    }
+
+    public static function formatMoney($amount, $decimals = 2, $useDevanagari = null)
+    {
+        return NepaliHelper::formatNpr($amount, $decimals, $useDevanagari);
+    }
+
+    public static function getLocale()
+    {
+        return app()->getLocale();
     }
 
 }

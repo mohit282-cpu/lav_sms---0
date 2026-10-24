@@ -44,4 +44,17 @@ class HomeController extends Controller
 
         return view('pages.support_team.dashboard', $d);
     }
+
+    public function set_locale($lang)
+    {
+        if (in_array($lang, ['ne', 'en'], true)) {
+            session()->put('locale', $lang);
+
+            if (auth()->check()) {
+                auth()->user()->update(['locale' => $lang]);
+            }
+        }
+
+        return redirect()->back();
+    }
 }

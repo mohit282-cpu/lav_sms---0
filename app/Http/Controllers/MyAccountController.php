@@ -27,9 +27,15 @@ class MyAccountController extends Controller
 
     public function update_profile(UserUpdate $req)
     {
-        $user = Auth::user();
+        $fields = ['email', 'phone', 'phone2', 'address', 'locale'];
+        if (!$user->username) {
+            $fields[] = 'username';
+        }
+        $d = $req->only($fields);
 
-        $d = $user->username ? $req->only(['email', 'phone', 'address']) : $req->only(['email', 'phone', 'address', 'username']);
+        if ($req->filled('locale') && in_array($req->locale, ['ne', 'en'], true)) {
+            session()->put('locale', $req->locale);
+        }
 
         if(!$user->username && !$req->username && !$req->email){
             return back()->with('pop_error', __('msg.user_invalid'));
