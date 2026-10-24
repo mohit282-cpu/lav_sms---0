@@ -224,6 +224,32 @@
                     </li>
                 @endif
 
+                {{--Attendance Management (Nepal BS)--}}
+                @if(Qs::userIsTeamSAT())
+                    <li class="nav-item nav-item-submenu {{ in_array(Route::currentRouteName(), ['attendance.index', 'attendance.monthly', 'attendance.class_report', 'staff_attendance.index', 'staff_attendance.monthly']) ? 'nav-item-expanded nav-item-open' : '' }}">
+                        <a href="#" class="nav-link"><i class="icon-user-check"></i> <span>{{ __('Attendance') }}</span></a>
+                        <ul class="nav nav-group-sub" data-submenu-title="{{ __('Attendance') }}">
+                            <li class="nav-item">
+                                <a href="{{ route('attendance.index') }}" class="nav-link {{ Route::is('attendance.index') ? 'active' : '' }}">{{ __('Daily Student Attendance') }}</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ route('attendance.monthly') }}" class="nav-link {{ Route::is('attendance.monthly') ? 'active' : '' }}">{{ __('Monthly Attendance Sheet') }}</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ route('attendance.class_report') }}" class="nav-link {{ Route::is('attendance.class_report') ? 'active' : '' }}">{{ __('Class Comparison Report') }}</a>
+                            </li>
+                            @if(Qs::userIsTeamSA())
+                                <li class="nav-item">
+                                    <a href="{{ route('staff_attendance.index') }}" class="nav-link {{ Route::is('staff_attendance.index') ? 'active' : '' }}">{{ __('Daily Staff Attendance') }}</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a href="{{ route('staff_attendance.monthly') }}" class="nav-link {{ Route::is('staff_attendance.monthly') ? 'active' : '' }}">{{ __('Staff Monthly Summary') }}</a>
+                                </li>
+                            @endif
+                        </ul>
+                    </li>
+                @endif
+
                 @include('pages.'.Qs::getUserType().'.menu')
 
                 {{--Manage Account--}}

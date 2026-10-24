@@ -53,6 +53,7 @@
 
                                             <div class="dropdown-menu dropdown-menu-left">
                                                 <a href="{{ route('students.show', Qs::hash($s->id)) }}" class="dropdown-item"><i class="icon-eye"></i> View Profile</a>
+                                                <a href="{{ route('attendance.student_history', $s->id) }}" class="dropdown-item"><i class="icon-user-check"></i> {{ __('Attendance History') }}</a>
                                                 @if(Qs::userIsTeamSA())
                                                     <a href="{{ route('students.edit', Qs::hash($s->id)) }}" class="dropdown-item"><i class="icon-pencil"></i> Edit</a>
                                                     <a href="{{ route('st.reset_pass', Qs::hash($s->user->id)) }}" class="dropdown-item"><i class="icon-lock"></i> Reset password</a>
@@ -103,6 +104,7 @@
 
                                                 <div class="dropdown-menu dropdown-menu-right">
                                                     <a href="{{ route('students.show', Qs::hash($sr->id)) }}" class="dropdown-item"><i class="icon-eye"></i> View Info</a>
+                                                    <a href="{{ route('attendance.student_history', $sr->id) }}" class="dropdown-item"><i class="icon-user-check"></i> {{ __('Attendance History') }}</a>
                                                     @if(Qs::userIsTeamSA())
                                                         <a href="{{ route('students.edit', Qs::hash($sr->id)) }}" class="dropdown-item"><i class="icon-pencil"></i> Edit</a>
                                                         <a href="{{ route('st.reset_pass', Qs::hash($sr->user->id)) }}" class="dropdown-item"><i class="icon-lock"></i> Reset password</a>

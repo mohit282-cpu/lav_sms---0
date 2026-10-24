@@ -38,4 +38,9 @@ class StudentRecord extends Eloquent
     {
         return $this->belongsTo(Dorm::class);
     }
+
+    public function attendances()
+    {
+        return $this->hasMany(StudentAttendance::class, 'student_record_id');
+    }
 }

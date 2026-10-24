@@ -157,6 +157,21 @@ Route::group(['middleware' => 'auth'], function () {
         Route::resource('holidays', 'HolidayController');
         Route::get('calendar/events', 'HolidayController@events')->name('calendar.events');
 
+        /*************** Nepal Attendance Management (BS) *****************/
+        Route::group(['middleware' => 'teamSAT'], function(){
+            Route::get('attendance', 'AttendanceController@index')->name('attendance.index');
+            Route::post('attendance', 'AttendanceController@store')->name('attendance.store');
+            Route::get('attendance/monthly', 'AttendanceController@monthly')->name('attendance.monthly');
+            Route::get('attendance/class-report', 'AttendanceController@classReport')->name('attendance.class_report');
+        });
+        Route::get('attendance/student/{student_id}', 'AttendanceController@studentHistory')->name('attendance.student_history');
+
+        Route::group(['middleware' => 'teamSA'], function(){
+            Route::get('staff-attendance', 'StaffAttendanceController@index')->name('staff_attendance.index');
+            Route::post('staff-attendance', 'StaffAttendanceController@store')->name('staff_attendance.store');
+            Route::get('staff-attendance/monthly', 'StaffAttendanceController@monthly')->name('staff_attendance.monthly');
+        });
+
     });
 
     /************************ AJAX ****************************/
