@@ -12,9 +12,17 @@ class ExampleTest extends TestCase
      *
      * @return void
      */
-    public function testBasicTest()
+    public function testGuestIsRedirectedToLogin()
     {
         $response = $this->get('/');
+
+        $response->assertStatus(302);
+        $response->assertRedirect('/login');
+    }
+
+    public function testLoginPageLoads()
+    {
+        $response = $this->get('/login');
 
         $response->assertStatus(200);
     }
