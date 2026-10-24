@@ -4,10 +4,10 @@
         <thead>
         <tr>
             <th>#</th>
-            <th>Photo</th>
-            <th>Name</th>
-            <th>Current Session</th>
-            <th>Action</th>
+            <th>{{ __('Photo') }}</th>
+            <th>{{ __('Name') }}</th>
+            <th>{{ __('Current Session') }}</th>
+            <th>{{ __('Action') }}</th>
         </tr>
         </thead>
         <tbody>
@@ -19,9 +19,9 @@
                 <td>{{ $sr->session }}</td>
                 <td>
                     <select class="form-control select" name="p-{{$sr->id}}" id="p-{{$sr->id}}">
-                        <option value="P">Promote</option>
-                        <option value="D">Don't Promote</option>
-                        <option value="G">Graduated</option>
+                        <option value="P">{{ __('Promote') }}</option>
+                        <option value="D">{{ __("Don't Promote") }}</option>
+                        <option value="G">{{ __('Graduated') }}</option>
                     </select>
                 </td>
             </tr>
@@ -29,6 +29,6 @@
         </tbody>
     </table>
     <div class="text-center mt-3">
-        <button class="btn btn-success"><i class="icon-stairs-up mr-2"></i> Promote Students</button>
+        <button class="btn btn-success"><i class="icon-stairs-up mr-2"></i> {{ __('Promote Students') }}</button>
     </div>
 </form>

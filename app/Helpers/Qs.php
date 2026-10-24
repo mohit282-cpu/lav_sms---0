@@ -275,14 +275,74 @@ class Qs
         return self::getSetting('current_session');
     }
 
-    public static function getNextSession()
+    public static function getNextSession($session = null)
     {
-        $oy = self::getCurrentSession();
-        $old_yr = explode('-', str_replace('/', '-', $oy));
-        if (count($old_yr) >= 2 && is_numeric($old_yr[0]) && is_numeric($old_yr[1])) {
-            return (++$old_yr[0]).'-'.(++$old_yr[1]);
+        $current = $session ?: self::getCurrentSession();
+
+        // 1. Try to find the next active or configured AcademicYear in the database
+        try {
+            $activeYear = \App\Models\AcademicYear::where('is_active', true)->first();
+            if ($activeYear) {
+                $baseYearBs = null;
+                if ($session) {
+                    $yearRec = \App\Models\AcademicYear::where('name', $session)->first();
+                    if ($yearRec) {
+                        $baseYearBs = $yearRec->year_bs;
+                    }
+                }
+                if (!$baseYearBs) {
+                    $baseYearBs = $activeYear->year_bs;
+                }
+
+                $nextYear = \App\Models\AcademicYear::where('year_bs', '>', $baseYearBs)
+                    ->orderBy('year_bs', 'asc')
+                    ->first();
+
+                if ($nextYear) {
+                    return $nextYear->name;
+                }
+
+                $nextYearBs = $baseYearBs + 1;
+                $nextShort = ($nextYearBs + 1) % 100;
+                if (stripos($current, 'BS') !== false || stripos($activeYear->name, 'BS') !== false) {
+                    return sprintf('%04d/%02d BS', $nextYearBs, $nextShort);
+                }
+            }
+        } catch (\Exception $e) {
+            // fallback if academic_years table does not exist
         }
-        return $oy;
+
+        // 2. Pattern matching on session string
+        // Match formats like "2083/84 BS", "2083/2084 BS", "2083-2084", "2083/84", "2018-2019"
+        if (preg_match('/(\d{4})([\/\-])(\d{2,4})/i', $current, $m)) {
+            $y1 = (int) $m[1];
+            $sep = $m[2];
+            $y2Str = $m[3];
+
+            $nextY1 = $y1 + 1;
+            if (strlen($y2Str) === 2) {
+                $nextY2 = sprintf('%02d', (((int) $y2Str) + 1) % 100);
+            } else {
+                $nextY2 = sprintf('%04d', ((int) $y2Str) + 1);
+            }
+
+            $hasBs = stripos($current, 'BS') !== false;
+            $hasAd = stripos($current, 'AD') !== false;
+            $suffix = $hasBs ? ' BS' : ($hasAd ? ' AD' : '');
+
+            return $nextY1 . $sep . $nextY2 . $suffix;
+        }
+
+        // Match single 4-digit year like "2083" or "2083 BS"
+        if (preg_match('/(\d{4})/i', $current, $m)) {
+            $nextY = ((int) $m[1]) + 1;
+            $hasBs = stripos($current, 'BS') !== false;
+            $hasAd = stripos($current, 'AD') !== false;
+            $suffix = $hasBs ? ' BS' : ($hasAd ? ' AD' : '');
+            return $nextY . $suffix;
+        }
+
+        return $current;
     }
 
     public static function getSystemName()
