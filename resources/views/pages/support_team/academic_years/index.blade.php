@@ -34,8 +34,8 @@
                                 <td>{{ $loop->iteration }}</td>
                                 <td class="font-weight-semibold">{{ $ay->name }}</td>
                                 <td>{{ App\Helpers\NepaliHelper::formatNumber($ay->year_bs) }} BS</td>
-                                <td>{{ $ay->start_date_bs }} BS <span class="text-muted">({{ $ay->start_date->format('Y-m-d') }})</span></td>
-                                <td>{{ $ay->end_date_bs }} BS <span class="text-muted">({{ $ay->end_date->format('Y-m-d') }})</span></td>
+                                <td>{{ $ay->start_date_bs }} BS <span class="text-muted">({{ $ay->start_date ? $ay->start_date->format('Y-m-d') : '' }})</span></td>
+                                <td>{{ $ay->end_date_bs }} BS <span class="text-muted">({{ $ay->end_date ? $ay->end_date->format('Y-m-d') : '' }})</span></td>
                                 <td>
                                     @if($ay->is_active)
                                         <span class="badge badge-success p-2">{{ __('Active Session') }}</span>
@@ -52,26 +52,21 @@
                                                 <i class="icon-menu9"></i>
                                             </a>
                                             <div class="dropdown-menu dropdown-menu-left">
+                                                <a href="{{ route('academic_years.edit', $ay->id) }}" class="dropdown-item"><i class="icon-pencil"></i> {{ __('Edit') }}</a>
                                                 @if(!$ay->is_active)
-                                                    <form method="post" action="{{ route('academic_years.activate', $ay->id) }}">
-                                                        @csrf
-                                                        @method('PUT')
-                                                        <button type="submit" class="dropdown-item text-success"><i class="icon-check"></i> {{ __('Set as Active Session') }}</button>
-                                                    </form>
+                                                    <a href="#" onclick="event.preventDefault(); document.getElementById('activate-form-{{ $ay->id }}').submit();" class="dropdown-item text-success"><i class="icon-check"></i> {{ __('Set as Active Session') }}</a>
+                                                    <form id="activate-form-{{ $ay->id }}" method="post" action="{{ route('academic_years.activate', $ay->id) }}" style="display: none;">@csrf @method('PUT')</form>
                                                 @endif
-                                                @if(!$ay->is_closed)
-                                                    <form method="post" action="{{ route('academic_years.close', $ay->id) }}">
-                                                        @csrf
-                                                        @method('PUT')
-                                                        <button type="submit" class="dropdown-item text-warning"><i class="icon-lock"></i> {{ __('Close / Archive Session') }}</button>
-                                                    </form>
+                                                @if($ay->is_closed)
+                                                    <a href="#" onclick="event.preventDefault(); document.getElementById('reopen-form-{{ $ay->id }}').submit();" class="dropdown-item text-info"><i class="icon-unlocked2"></i> {{ __('Reopen Session') }}</a>
+                                                    <form id="reopen-form-{{ $ay->id }}" method="post" action="{{ route('academic_years.reopen', $ay->id) }}" style="display: none;">@csrf @method('PUT')</form>
+                                                @else
+                                                    <a href="#" onclick="event.preventDefault(); document.getElementById('close-form-{{ $ay->id }}').submit();" class="dropdown-item text-warning"><i class="icon-lock"></i> {{ __('Close / Archive Session') }}</a>
+                                                    <form id="close-form-{{ $ay->id }}" method="post" action="{{ route('academic_years.close', $ay->id) }}" style="display: none;">@csrf @method('PUT')</form>
                                                 @endif
                                                 @if(!$ay->is_active)
-                                                    <form method="post" action="{{ route('academic_years.destroy', $ay->id) }}" onsubmit="return confirm('{{ __('Are you sure you want to delete this session?') }}');">
-                                                        @csrf
-                                                        @method('DELETE')
-                                                        <button type="submit" class="dropdown-item text-danger"><i class="icon-trash"></i> {{ __('Delete') }}</button>
-                                                    </form>
+                                                    <a id="{{ $ay->id }}" onclick="confirmDelete(this.id)" href="#" class="dropdown-item text-danger"><i class="icon-trash"></i> {{ __('Delete') }}</a>
+                                                    <form method="post" id="item-delete-{{ $ay->id }}" action="{{ route('academic_years.destroy', $ay->id) }}" style="display: none;">@csrf @method('DELETE')</form>
                                                 @endif
                                             </div>
                                         </div>

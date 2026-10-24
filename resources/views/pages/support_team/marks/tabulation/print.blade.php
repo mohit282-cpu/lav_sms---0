@@ -46,31 +46,29 @@
                     <th style="color: darkblue">CUM Average</th>
                 @endif--}}
                 <th style="color: darkred">Total</th>
-                <th style="color: darkblue">Average</th>
-                <th style="color: darkgreen">Position</th>
+                <th style="color: darkblue">Percentage</th>
+                <th style="color: purple">GPA</th>
+                <th style="color: teal">Grade</th>
+                <th style="color: darkgreen">Result</th>
             </tr>
             </thead>
             <tbody>
             @foreach($students as $s)
+                @php $record = $exr->where('student_id', $s->user_id)->first(); @endphp
                 <tr>
                     <td>{{ $loop->iteration }}</td>
-                    <td style="text-align: center">{{ $s->user->name }}</td>
+                    <td style="text-align: left">{{ $s->user->name }}</td>
                     @foreach($subjects as $sub)
                         <td>{{ $marks->where('student_id', $s->user_id)->where('subject_id', $sub->id)->first()->$tex ?? '-' ?: '-' }}</td>
                     @endforeach
 
-                    {{--@if($ex->term == 3)
-                        --}}{{--1st term Total--}}{{--
-                        <td>{{ Mk::getTermTotal($s->user_id, 1, $year) ?: '-' }}</td>
-                        --}}{{--2nd Term Total--}}{{--
-                        <td>{{ Mk::getTermTotal($s->user_id, 2, $year) ?: '-' }}</td>
-                        --}}{{--3rd Term total--}}{{--
-                        <td>{{ Mk::getTermTotal($s->user_id, 3, $year) ?: '-' }}</td>
-                    @endif--}}
-
-                    <td style="color: darkred">{{ $exr->where('student_id', $s->user_id)->first()->total ?: '-' }}</td>
-                    <td style="color: darkblue">{{ $exr->where('student_id', $s->user_id)->first()->ave ?: '-' }}</td>
-                    <td style="color: darkgreen">{!! Mk::getSuffix($exr->where('student_id', $s->user_id)->first()->pos) ?: '-' !!}</td>
+                    <td style="color: darkred">{{ $record->total ?? '-' }}</td>
+                    <td style="color: darkblue">{{ $record && $record->ave ? number_format($record->ave, 2).'%' : '-' }}</td>
+                    <td style="color: purple; font-weight: bold;">{{ $record && $record->gpa !== null ? number_format($record->gpa, 2) : '-' }}</td>
+                    <td style="color: teal; font-weight: bold;">{{ $record->grade ?? '-' }}</td>
+                    <td style="font-weight: bold; color: {{ ($record->result_status ?? '') === 'PASS' ? '#28a745' : (($record->result_status ?? '') === 'FAIL' ? '#dc3545' : '#6c757d') }}">
+                        {{ $record->result_status ?? '-' }}
+                    </td>
                 </tr>
             @endforeach
             </tbody>

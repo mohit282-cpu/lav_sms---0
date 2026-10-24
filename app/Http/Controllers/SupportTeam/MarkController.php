@@ -25,7 +25,7 @@ class MarkController extends Controller
         $this->mark =  $mark;
         $this->student =  $student;
         $this->my_class =  $my_class;
-        $this->year =  Qs::getSetting('current_session');
+        $this->year =  Qs::getCurrentSession();
 
        // $this->middleware('teamSAT', ['except' => ['show', 'year_selected', 'year_selector', 'print_view'] ]);
     }
@@ -76,9 +76,21 @@ class MarkController extends Controller
         }
 
         $wh = ['student_id' => $student_id, 'year' => $year ];
-        $d['marks'] = $this->exam->getMark($wh);
-        $d['exam_records'] = $exr = $this->exam->getRecord($wh);
-        $d['exams'] = $this->exam->getExam(['year' => $year]);
+
+        /* Prevent students/parents from viewing unpublished results */
+        if (!Qs::userIsTeamSAT()) {
+            $publishedExamIds = \App\Models\Exam::where(['year' => $year, 'status' => 'published'])->pluck('id')->toArray();
+            $d['marks'] = $this->exam->getMark($wh)->whereIn('exam_id', $publishedExamIds);
+            $d['exam_records'] = $exr = $this->exam->getRecord($wh)->whereIn('exam_id', $publishedExamIds);
+            $d['exams'] = $this->exam->getExam(['year' => $year])->where('status', 'published');
+            if ($d['exams']->isEmpty() || $d['exam_records']->isEmpty()) {
+                return redirect(route('dashboard'))->with('flash_danger', __('Results for this session have not been published yet.'));
+            }
+        } else {
+            $d['marks'] = $this->exam->getMark($wh);
+            $d['exam_records'] = $exr = $this->exam->getRecord($wh);
+            $d['exams'] = $this->exam->getExam(['year' => $year]);
+        }
         $d['sr'] = $this->student->getRecord(['user_id' => $student_id])->first();
         $d['my_class'] = $mc = $this->my_class->getMC(['id' => $exr->first()->my_class_id])->first();
         $d['class_type'] = $this->my_class->findTypeByClass($mc->id);
@@ -117,6 +129,15 @@ class MarkController extends Controller
         $d['my_class'] = $mc = $this->my_class->find($exr->my_class_id);
         $d['section_id'] = $exr->section_id;
         $d['ex'] = $exam = $this->exam->find($exam_id);
+        if (!$exam) {
+            return $this->noStudentRecord();
+        }
+
+        /* Prevent students/parents from viewing unpublished results */
+        if (!Qs::userIsTeamSAT() && $exam->status !== 'published') {
+            return redirect(route('dashboard'))->with('flash_danger', __('Results for this examination have not been published yet.'));
+        }
+
         $d['tex'] = 'tex'.$exam->term;
         $d['sr'] = $sr =$this->student->getRecord(['user_id' => $student_id])->first();
         $d['class_type'] = $this->my_class->findTypeByClass($mc->id);
@@ -183,79 +204,144 @@ class MarkController extends Controller
 
     public function update(Request $req, $exam_id, $class_id, $section_id, $subject_id)
     {
-        $p = ['exam_id' => $exam_id, 'my_class_id' => $class_id, 'section_id' => $section_id, 'subject_id' => $subject_id, 'year' => $this->year];
-
-        $d = $d3 = $all_st_ids = [];
-
         $exam = $this->exam->find($exam_id);
+        $examYear = $exam ? $exam->year : $this->year;
+        $p = ['exam_id' => $exam_id, 'my_class_id' => $class_id, 'section_id' => $section_id, 'subject_id' => $subject_id, 'year' => $examYear];
+        $subject = \App\Models\Subject::find($subject_id);
         $marks = $this->exam->getMark($p);
         $class_type = $this->my_class->findTypeByClass($class_id);
+        $gradingService = app(\App\Services\NepalGradingService::class);
 
         $mks = $req->all();
+        $all_st_ids = [];
 
-        /** Test, Exam, Grade **/
-        foreach($marks->sortBy('user.name') as $mk)
-        {
-            $all_st_ids[] = $mk->student_id;
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        try {
+            /** Test, Exam, Grade **/
+            foreach($marks->sortBy('user.name') as $mk)
+            {
+                $all_st_ids[] = $mk->student_id;
+                $oldValues = $mk->only(['theory_mark', 'practical_mark', 'total_mark', 'gpa_point', 'grade_name', 'is_absent', 'is_exempt']);
 
-                $d['t1'] = $t1 = $mks['t1_'.$mk->id];
-                $d['t2'] = $t2 = $mks['t2_'.$mk->id];
-                $d['tca'] = $tca = $t1 + $t2;
-                $d['exm'] = $exm = $mks['exm_'.$mk->id];
+                $isAbsent = isset($mks['absent_'.$mk->id]) && $mks['absent_'.$mk->id] == '1';
+                $isExempt = isset($mks['exempt_'.$mk->id]) && $mks['exempt_'.$mk->id] == '1';
 
+                $theoryMark = isset($mks['theory_'.$mk->id]) && $mks['theory_'.$mk->id] !== '' ? (float)$mks['theory_'.$mk->id] : (isset($mks['exm_'.$mk->id]) && $mks['exm_'.$mk->id] !== '' ? (float)$mks['exm_'.$mk->id] : null);
+                $practicalMark = isset($mks['practical_'.$mk->id]) && $mks['practical_'.$mk->id] !== '' ? (float)$mks['practical_'.$mk->id] : (isset($mks['t1_'.$mk->id]) && $mks['t1_'.$mk->id] !== '' ? (float)$mks['t1_'.$mk->id] : null);
 
-            /** SubTotal Grade, Remark, Cum, CumAvg**/
+                // Enforce marks boundaries
+                $theoryMax = $subject ? ($subject->has_practical ? $subject->theory_max : $subject->total_max) : 100;
+                $practicalMax = ($subject && $subject->has_practical) ? $subject->practical_max : 0;
+                $totalMax = $subject ? $subject->total_max : 100;
 
-            $d['tex'.$exam->term] = $total = $tca + $exm;
+                if ($theoryMark !== null && ($theoryMark < 0 || $theoryMark > $theoryMax)) {
+                    \Illuminate\Support\Facades\DB::rollBack();
+                    return response()->json(['ok' => false, 'msg' => __('Marks must be between 0 and maximum :max', ['max' => $theoryMax])], 422);
+                }
 
-            if($total > 100){
-                $d['tex'.$exam->term] = $d['t1'] = $d['t2'] = $d['t3'] = $d['t4'] = $d['tca'] = $d['exm'] = NULL;
+                if ($practicalMark !== null && ($practicalMark < 0 || $practicalMark > $practicalMax)) {
+                    \Illuminate\Support\Facades\DB::rollBack();
+                    return response()->json(['ok' => false, 'msg' => __('Practical marks must be between 0 and maximum :max', ['max' => $practicalMax])], 422);
+                }
+
+                $total = 0;
+                if (!$isAbsent && !$isExempt) {
+                    $total = ($theoryMark ?? 0) + ($practicalMark ?? 0);
+                    if ($total > $totalMax) {
+                        \Illuminate\Support\Facades\DB::rollBack();
+                        return response()->json(['ok' => false, 'msg' => __('Total marks cannot exceed :max', ['max' => $totalMax])], 422);
+                    }
+                }
+
+                // Percentage calculation for grading
+                $percentage = ($totalMax > 0 && !$isAbsent && !$isExempt) ? ($total / $totalMax) * 100 : 0;
+                $gradeResult = $gradingService->getGradeAndGpa($percentage, $isAbsent, $isExempt);
+
+                $d = [
+                    't1' => $practicalMark,
+                    't2' => null,
+                    'tca' => $practicalMark,
+                    'exm' => $theoryMark,
+                    'tex'.$exam->term => $total,
+                    'theory_mark' => $theoryMark,
+                    'practical_mark' => $practicalMark,
+                    'total_mark' => $total,
+                    'gpa_point' => $gradeResult['gpa'],
+                    'grade_name' => $gradeResult['grade'],
+                    'is_absent' => $isAbsent,
+                    'is_exempt' => $isExempt,
+                    'is_passed' => $gradeResult['is_passed'],
+                    'remarks' => $gradeResult['remark'],
+                    'updated_by' => Auth::id(),
+                ];
+
+                // Check traditional grade fallback for backward compatibility
+                $legacyGrade = $this->mark->getGrade($total, $class_type->id);
+                $d['grade_id'] = $legacyGrade ? $legacyGrade->id : null;
+
+                $this->exam->updateMark($mk->id, $d);
+
+                // Audit Trail
+                \App\Models\MarkAuditTrail::create([
+                    'mark_id' => $mk->id,
+                    'student_id' => $mk->student_id,
+                    'subject_id' => $subject_id,
+                    'exam_id' => $exam_id,
+                    'action' => 'updated',
+                    'old_values' => $oldValues,
+                    'new_values' => $d,
+                    'user_id' => Auth::id(),
+                ]);
             }
 
-         /*   if($exam->term < 3){
-                $grade = $this->mark->getGrade($total, $class_type->id);
+            /** Sub Position **/
+            foreach($marks->sortBy('user.name') as $mk)
+            {
+                $d2['sub_pos'] = $this->mark->getSubPos($mk->student_id, $exam, $class_id, $subject_id, $examYear);
+                $this->exam->updateMark($mk->id, $d2);
             }
 
-            if($exam->term == 3){
-                $d['cum'] = $this->mark->getSubCumTotal($total, $st_id, $subject_id, $class_id, $this->year);
-                $d['cum_ave'] = $cav = $this->mark->getSubCumAvg($total, $st_id, $subject_id, $class_id, $this->year);
-                $grade = $this->mark->getGrade(round($cav), $class_type->id);
-            }*/
-            $grade = $this->mark->getGrade($total, $class_type->id);
-            $d['grade_id'] = $grade ? $grade->id : NULL;
+            /** Exam Record Update **/
+            unset($p['subject_id']);
 
-            $this->exam->updateMark($mk->id, $d);
+            foreach ($all_st_ids as $st_id) {
+                $p['student_id'] = $st_id;
+                $d3['total'] = $this->mark->getExamTotalTerm($exam, $st_id, $class_id, $examYear);
+                $d3['ave'] = $this->mark->getExamAvgTerm($exam, $st_id, $class_id, $section_id, $examYear);
+                $d3['class_ave'] = $this->mark->getClassAvg($exam, $class_id, $examYear);
+                $d3['pos'] = $this->mark->getPos($st_id, $exam, $class_id, $section_id, $examYear);
+
+                // Calculate cumulative GPA across all subjects for this student in this exam
+                $allStudentMarks = \App\Models\Mark::with('subject')
+                    ->where(['exam_id' => $exam_id, 'student_id' => $st_id, 'year' => $examYear])
+                    ->get();
+
+                $subjectRecords = [];
+                foreach ($allStudentMarks as $sm) {
+                    $subjectRecords[] = [
+                        'gpa' => $sm->gpa_point ?? 0.0,
+                        'credit_hour' => $sm->subject ? $sm->subject->credit_hour : 4.0,
+                        'is_absent' => $sm->is_absent,
+                        'is_exempt' => $sm->is_exempt,
+                        'is_passed' => $sm->is_passed,
+                    ];
+                }
+
+                $overall = $gradingService->calculateOverallResult($subjectRecords);
+                $d3['gpa'] = $overall['gpa'];
+                $d3['grade'] = $overall['overall_grade'];
+                $d3['result_status'] = $overall['result_status'];
+
+                $this->exam->updateRecord($p, $d3);
+            }
+
+            \Illuminate\Support\Facades\DB::commit();
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
+            return response()->json(['ok' => false, 'msg' => $e->getMessage()], 500);
         }
 
-        /** Sub Position Begin  **/
-
-        foreach($marks->sortBy('user.name') as $mk)
-        {
-
-            $d2['sub_pos'] = $this->mark->getSubPos($mk->student_id, $exam, $class_id, $subject_id, $this->year);
-
-            $this->exam->updateMark($mk->id, $d2);
-        }
-
-        /*Sub Position End*/
-
-        /* Exam Record Update */
-
-        unset( $p['subject_id'] );
-
-        foreach ($all_st_ids as $st_id) {
-
-            $p['student_id'] =$st_id;
-            $d3['total'] = $this->mark->getExamTotalTerm($exam, $st_id, $class_id, $this->year);
-            $d3['ave'] = $this->mark->getExamAvgTerm($exam, $st_id, $class_id, $section_id, $this->year);
-            $d3['class_ave'] = $this->mark->getClassAvg($exam, $class_id, $this->year);
-            $d3['pos'] = $this->mark->getPos($st_id, $exam, $class_id, $section_id, $this->year);
-
-            $this->exam->updateRecord($p, $d3);
-        }
-        /*Exam Record End*/
-
-       return Qs::jsonUpdateOk();
+        return Qs::jsonUpdateOk();
     }
 
     public function batch_fix()

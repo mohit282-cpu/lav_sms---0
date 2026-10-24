@@ -143,13 +143,16 @@ Route::group(['middleware' => 'auth'], function () {
         Route::resource('subjects', 'SubjectController');
         Route::resource('grades', 'GradeController');
         Route::resource('exams', 'ExamController');
+        Route::put('exams/{exam}/publish', 'ExamController@publish')->name('exams.publish');
+        Route::put('exams/{exam}/unpublish', 'ExamController@unpublish')->name('exams.unpublish');
         Route::resource('dorms', 'DormController');
         Route::resource('payments', 'PaymentController');
 
         /*************** Academic Years & Holidays (Nepal BS) *****************/
         Route::resource('academic_years', 'AcademicYearController');
-        Route::put('academic_years/activate/{id}', 'AcademicYearController@activate')->name('academic_years.activate');
-        Route::put('academic_years/close/{id}', 'AcademicYearController@close')->name('academic_years.close');
+        Route::put('academic_years/activate/{academic_year}', 'AcademicYearController@activate')->name('academic_years.activate');
+        Route::put('academic_years/close/{academic_year}', 'AcademicYearController@close')->name('academic_years.close');
+        Route::put('academic_years/reopen/{academic_year}', 'AcademicYearController@reopen')->name('academic_years.reopen');
 
         Route::resource('holidays', 'HolidayController');
         Route::get('calendar/events', 'HolidayController@events')->name('calendar.events');

@@ -98,4 +98,56 @@ class AcademicYearAndHolidayTest extends TestCase
             '*' => ['id', 'title', 'start', 'end', 'color']
         ]);
     }
+
+    public function test_admin_can_edit_and_update_academic_year()
+    {
+        $admin = $this->getAdminUser();
+        $ay = AcademicYear::first();
+
+        // View edit page
+        $response = $this->actingAs($admin)->get(route('academic_years.edit', $ay->id));
+        $response->assertStatus(200);
+        $response->assertSee($ay->name);
+
+        // Update academic year
+        $response = $this->actingAs($admin)->put(route('academic_years.update', $ay->id), [
+            'name' => '2083/84 BS Updated',
+            'year_bs' => 2083,
+            'start_date_bs' => '2083-01-01',
+            'end_date_bs' => '2083-12-30',
+            'is_active' => '1',
+            'description' => 'Updated session notes',
+        ]);
+
+        $response->assertSessionHas('flash_success');
+
+        $ay->refresh();
+        $this->assertEquals('2083/84 BS Updated', $ay->name);
+        $this->assertEquals('Updated session notes', $ay->description);
+    }
+
+    public function test_admin_can_activate_and_close_academic_year()
+    {
+        $admin = $this->getAdminUser();
+        $ay = AcademicYear::first();
+
+        // Activate
+        $response = $this->actingAs($admin)->put(route('academic_years.activate', $ay->id));
+        $response->assertSessionHas('flash_success');
+        $ay->refresh();
+        $this->assertTrue((bool)$ay->is_active);
+
+        // Close / archive
+        $response = $this->actingAs($admin)->put(route('academic_years.close', $ay->id));
+        $response->assertSessionHas('flash_success');
+        $ay->refresh();
+        $this->assertTrue((bool)$ay->is_closed);
+        $this->assertFalse((bool)$ay->is_active);
+
+        // Reopen
+        $response = $this->actingAs($admin)->put(route('academic_years.reopen', $ay->id));
+        $response->assertSessionHas('flash_success');
+        $ay->refresh();
+        $this->assertFalse((bool)$ay->is_closed);
+    }
 }

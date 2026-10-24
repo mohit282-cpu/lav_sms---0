@@ -1,64 +1,82 @@
 <table class="table table-bordered table-responsive text-center">
     <thead>
     <tr>
-        <th rowspan="2">S/N</th>
-        <th rowspan="2">SUBJECTS</th>
-        <th rowspan="2">CA1<br>(20)</th>
-        <th rowspan="2">CA2<br>(20)</th>
-        <th rowspan="2">EXAMS<br>(60)</th>
-        <th rowspan="2">TOTAL<br>(100)</th>
-
-        {{--@if($ex->term == 3) --}}{{-- 3rd Term --}}{{--
-        <th rowspan="2">TOTAL <br>(100%) 3<sup>RD</sup> TERM</th>
-        <th rowspan="2">1<sup>ST</sup> <br> TERM</th>
-        <th rowspan="2">2<sup>ND</sup> <br> TERM</th>
-        <th rowspan="2">CUM (300%) <br> 1<sup>ST</sup> + 2<sup>ND</sup> + 3<sup>RD</sup></th>
-        <th rowspan="2">CUM AVE</th>
-        @endif--}}
-
-        <th rowspan="2">GRADE</th>
-        <th rowspan="2">SUBJECT <br> POSITION</th>
-        <th rowspan="2">REMARKS</th>
+        <th>{{ __('SN') }}</th>
+        <th>{{ __('Subject') }}</th>
+        <th>{{ __('Credit Hour') }}</th>
+        <th>{{ __('Theory') }}</th>
+        <th>{{ __('Practical') }}</th>
+        <th>{{ __('Total') }}</th>
+        <th>{{ __('Grade Point') }}</th>
+        <th>{{ __('Letter Grade') }}</th>
+        <th>{{ __('Remarks') }}</th>
     </tr>
     </thead>
 
     <tbody>
     @foreach($subjects as $sub)
+        @php
+            $mk = $marks->where('subject_id', $sub->id)->where('exam_id', $ex->id)->first();
+        @endphp
         <tr>
             <td>{{ $loop->iteration }}</td>
-            <td>{{ $sub->name }}</td>
-            @foreach($marks->where('subject_id', $sub->id)->where('exam_id', $ex->id) as $mk)
-                <td>{{ ($mk->t1) ?: '-' }}</td>
-                <td>{{ ($mk->t2) ?: '-' }}</td>
-                <td>{{ ($mk->exm) ?: '-' }}</td>
-                <td>
-                    @if($ex->term === 1) {{ ($mk->tex1) }}
-                    @elseif ($ex->term === 2) {{ ($mk->tex2) }}
-                    @elseif ($ex->term === 3) {{ ($mk->tex3) }}
-                    @else {{ '-' }}
+            <td class="text-left font-weight-semibold">{{ $sub->name }}</td>
+            <td>{{ number_format($sub->credit_hour ?: 4.0, 2) }}</td>
+            <td>
+                @if($mk)
+                    @if($mk->is_absent) <span class="badge badge-danger">ABS</span>
+                    @elseif($mk->is_exempt) <span class="badge badge-warning">EXM</span>
+                    @else {{ $mk->theory_mark !== null ? $mk->theory_mark : ($mk->exm ?? '-') }}
                     @endif
-                </td>
-
-                {{--3rd Term--}}
-                {{-- @if($ex->term == 3)
-                     <td>{{ $mk->tex3 ?: '-' }}</td>
-                     <td>{{ Mk::getSubTotalTerm($student_id, $sub->id, 1, $mk->my_class_id, $year) }}</td>
-                     <td>{{ Mk::getSubTotalTerm($student_id, $sub->id, 2, $mk->my_class_id, $year) }}</td>
-                     <td>{{ $mk->cum ?: '-' }}</td>
-                     <td>{{ $mk->cum_ave ?: '-' }}</td>
-                 @endif--}}
-
-                {{--Grade, Subject Position & Remarks--}}
-                <td>{{ ($mk->grade) ? $mk->grade->name : '-' }}</td>
-                <td>{!! ($mk->grade) ? Mk::getSuffix($mk->sub_pos) : '-' !!}</td>
-                <td>{{ ($mk->grade) ? $mk->grade->remark : '-' }}</td>
-            @endforeach
+                @else -
+                @endif
+            </td>
+            <td>
+                @if($sub->has_practical)
+                    @if($mk)
+                        @if($mk->is_absent) <span class="badge badge-danger">ABS</span>
+                        @elseif($mk->is_exempt) <span class="badge badge-warning">EXM</span>
+                        @else {{ $mk->practical_mark !== null ? $mk->practical_mark : ($mk->t1 ?? '-') }}
+                        @endif
+                    @else -
+                    @endif
+                @else
+                    <span class="text-muted">-</span>
+                @endif
+            </td>
+            <td class="font-weight-bold">
+                @if($mk)
+                    @if($mk->is_absent) <span class="badge badge-danger">ABS</span>
+                    @elseif($mk->is_exempt) <span class="badge badge-warning">EXM</span>
+                    @else {{ $mk->total_mark !== null ? $mk->total_mark : ($mk->{'tex'.$ex->term} ?? '-') }}
+                    @endif
+                @else -
+                @endif
+            </td>
+            <td class="font-weight-bold" style="color: purple;">
+                {{ $mk && $mk->gpa_point !== null ? number_format($mk->gpa_point, 2) : '-' }}
+            </td>
+            <td>
+                @if($mk && $mk->grade_name)
+                    <span class="badge {{ in_array($mk->grade_name, ['A+', 'A', 'B+']) ? 'badge-success' : (in_array($mk->grade_name, ['B', 'C+', 'C', 'D']) ? 'badge-info' : 'badge-danger') }}">
+                        {{ $mk->grade_name }}
+                    </span>
+                @elseif($mk && $mk->grade)
+                    <span class="badge badge-secondary">{{ $mk->grade->name }}</span>
+                @else -
+                @endif
+            </td>
+            <td>{{ $mk->remarks ?? ($mk && $mk->grade ? $mk->grade->remark : '-') }}</td>
         </tr>
     @endforeach
-    <tr>
-        <td colspan="4"><strong>TOTAL SCORES OBTAINED: </strong> {{ $exr->total }}</td>
-        <td colspan="3"><strong>FINAL AVERAGE: </strong> {{ $exr->ave }}</td>
-        <td colspan="2"><strong>CLASS AVERAGE: </strong> {{ $exr->class_ave }}</td>
+    <tr class="font-weight-bold" style="background-color: #f8f9fa;">
+        <td colspan="3" class="text-left"><strong>{{ __('Total Marks') }}:</strong> {{ $exr->total ?: '-' }}</td>
+        <td colspan="2"><strong>{{ __('Percentage') }}:</strong> {{ $exr->ave ? number_format($exr->ave, 2).'%' : '-' }}</td>
+        <td colspan="2" style="color: purple;"><strong>{{ __('GPA') }}:</strong> {{ $exr->gpa !== null ? number_format($exr->gpa, 2) : '-' }}</td>
+        <td><strong>{{ __('Grade') }}:</strong> {{ $exr->grade ?: '-' }}</td>
+        <td style="color: {{ ($exr->result_status ?? '') === 'PASS' ? '#28a745' : (($exr->result_status ?? '') === 'FAIL' ? '#dc3545' : '#6c757d') }}">
+            <strong>{{ __('Result') }}:</strong> {{ $exr->result_status ?: '-' }}
+        </td>
     </tr>
     </tbody>
 </table>

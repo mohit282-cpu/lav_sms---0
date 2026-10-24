@@ -7,7 +7,28 @@ use Eloquent;
 
 class Mark extends Eloquent
 {
-    protected $fillable = ['t1', 't2', 't3', 't4', 'tca', 'exm', 'tex1', 'tex2', 'tex3', 'sub_pos', 'cum', 'cum_ave', 'grade_id', 'year', 'exam_id', 'subject_id', 'my_class_id', 'student_id', 'section_id'];
+    protected $fillable = [
+        't1', 't2', 't3', 't4', 'tca', 'exm', 'tex1', 'tex2', 'tex3',
+        'sub_pos', 'cum', 'cum_ave', 'grade_id', 'year', 'exam_id',
+        'subject_id', 'my_class_id', 'student_id', 'section_id',
+        'theory_mark', 'practical_mark', 'total_mark', 'gpa_point', 'grade_name',
+        'is_absent', 'is_exempt', 'is_passed', 'remarks', 'updated_by'
+    ];
+
+    protected $casts = [
+        'is_absent' => 'boolean',
+        'is_exempt' => 'boolean',
+        'is_passed' => 'boolean',
+        'theory_mark' => 'float',
+        'practical_mark' => 'float',
+        'total_mark' => 'float',
+        'gpa_point' => 'float',
+    ];
+
+    public function audit_trails()
+    {
+        return $this->hasMany(MarkAuditTrail::class);
+    }
 
     public function exam()
     {
