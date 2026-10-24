@@ -263,14 +263,26 @@ class Qs
 
     public static function getCurrentSession()
     {
+        try {
+            $activeYear = \App\Models\AcademicYear::where('is_active', true)->first();
+            if ($activeYear) {
+                return $activeYear->name;
+            }
+        } catch (\Exception $e) {
+            // fallback if table does not exist or error occurs
+        }
+
         return self::getSetting('current_session');
     }
 
     public static function getNextSession()
     {
         $oy = self::getCurrentSession();
-        $old_yr = explode('-', $oy);
-        return ++$old_yr[0].'-'.++$old_yr[1];
+        $old_yr = explode('-', str_replace('/', '-', $oy));
+        if (count($old_yr) >= 2 && is_numeric($old_yr[0]) && is_numeric($old_yr[1])) {
+            return (++$old_yr[0]).'-'.(++$old_yr[1]);
+        }
+        return $oy;
     }
 
     public static function getSystemName()

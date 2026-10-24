@@ -42,5 +42,6 @@
 <!-- /theme JS files -->
 
 <script src=" {{ asset('assets/js/custom.js') }} "></script>
+<script src=" {{ asset('assets/js/nepali_datepicker.js') }} "></script>
 
 @include('partials.js.custom_js')

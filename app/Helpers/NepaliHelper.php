@@ -90,4 +90,76 @@ class NepaliHelper
 
         return 'NPR ' . $formattedAmount;
     }
+
+    /**
+     * Format a stored AD date as Bikram Sambat (BS).
+     *
+     * @param string|\DateTimeInterface|null $adDate
+     * @param string $format 'auto', 'ne', 'en', or 'Y-m-d'
+     * @return string
+     */
+    public static function formatBs($adDate, $format = 'auto')
+    {
+        if (empty($adDate)) {
+            return '';
+        }
+
+        return app(\App\Services\BikramSambatService::class)->formatBs($adDate, $format);
+    }
+
+    /**
+     * Format dual date: BS Date (AD Date) or AD Date (BS Date) based on locale.
+     *
+     * @param string|\DateTimeInterface|null $adDate
+     * @return string
+     */
+    public static function formatDualDate($adDate)
+    {
+        if (empty($adDate)) {
+            return '';
+        }
+
+        return app(\App\Services\BikramSambatService::class)->formatDual($adDate);
+    }
+
+    /**
+     * Convert user entered BS date (YYYY-MM-DD) to stored AD date (YYYY-MM-DD).
+     *
+     * @param string|null $bsDate
+     * @return string|null
+     */
+    public static function bsToAd($bsDate)
+    {
+        if (empty($bsDate)) {
+            return null;
+        }
+
+        try {
+            $conv = app(\App\Services\BikramSambatService::class)->bsToAd($bsDate);
+            return $conv['ad_date'];
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Convert stored AD date (YYYY-MM-DD) to BS date string (YYYY-MM-DD).
+     *
+     * @param string|\DateTimeInterface|null $adDate
+     * @return string|null
+     */
+    public static function adToBs($adDate)
+    {
+        if (empty($adDate)) {
+            return null;
+        }
+
+        try {
+            $conv = app(\App\Services\BikramSambatService::class)->adToBs($adDate);
+            return $conv['bs_date'];
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
 }
+

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "877f6720f59a79673e990380aa7f98d9",
+    "content-hash": "23557bae70bb41cde1b5003122ceac61",
     "packages": [
         {
             "name": "asm89/stack-cors",
@@ -702,6 +702,63 @@
                 }
             ],
             "time": "2020-12-29T14:50:06+00:00"
+        },
+        {
+            "name": "ernilambar/nepali-date",
+            "version": "1.0.9",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/ernilambar/nepali-date.git",
+                "reference": "d694aba3329b4e27584f16073c4e88070ebd1eab"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/ernilambar/nepali-date/zipball/d694aba3329b4e27584f16073c4e88070ebd1eab",
+                "reference": "d694aba3329b4e27584f16073c4e88070ebd1eab",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=5.6"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Nilambar\\NepaliDate\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Nilambar Sharma",
+                    "email": "nilambar@outlook.com",
+                    "homepage": "https://www.nilambar.net",
+                    "role": "Developer"
+                }
+            ],
+            "description": "Nepali (Bikram Sambat) calendar utilities and BS ↔ AD date conversion for PHP.",
+            "homepage": "https://github.com/ernilambar/nepali-date",
+            "keywords": [
+                "BS",
+                "ad",
+                "bikram-sambat",
+                "calendar",
+                "conversion",
+                "converter",
+                "date",
+                "date-converter",
+                "gregorian",
+                "nepali",
+                "nepali-calendar"
+            ],
+            "support": {
+                "docs": "https://github.com/ernilambar/nepali-date#readme",
+                "issues": "https://github.com/ernilambar/nepali-date/issues",
+                "source": "https://github.com/ernilambar/nepali-date"
+            },
+            "time": "2026-04-28T06:09:56+00:00"
         },
         {
             "name": "fakerphp/faker",
@@ -8770,7 +8827,7 @@
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
-        "php": "^7.2||^8.0||^8.1||^8.2"
+        "php": "^7.2||^8.0||^8.1||^8.2||^8.3"
     },
     "platform-dev": {},
     "plugin-api-version": "2.9.0"

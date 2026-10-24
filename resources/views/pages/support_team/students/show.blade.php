@@ -70,8 +70,8 @@
                                 </tr>
                             @endif
                             <tr>
-                                <td class="font-weight-bold">Birthday</td>
-                                <td>{{$sr->user->dob }}</td>
+                                <td class="font-weight-bold">{{ __('Date of Birth') }}</td>
+                                <td>{{ App\Helpers\NepaliHelper::formatDualDate($sr->user->dob) }}</td>
                             </tr>
                             @if($sr->user->bg_id)
                             <tr>

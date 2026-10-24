@@ -74,11 +74,19 @@ class StudentRecordController extends Controller
             $data['photo'] = asset('storage/' . $f['path']);
         }
 
+        if(!empty($data['dob'])) {
+            // If entered as BS date YYYY-MM-DD (year >= 2000), convert to AD date
+            $dobBsConv = \App\Helpers\NepaliHelper::bsToAd($data['dob']);
+            if($dobBsConv) {
+                $data['dob'] = $dobBsConv;
+            }
+        }
+
         $user = $this->user->create($data); // Create User
 
         $sr['adm_no'] = $data['username'];
         $sr['user_id'] = $user->id;
-        $sr['session'] = Qs::getSetting('current_session');
+        $sr['session'] = Qs::getCurrentSession();
 
         $this->student->createRecord($sr); // Create Student
         return Qs::jsonStoreOk();
@@ -155,6 +163,13 @@ class StudentRecordController extends Controller
             $f['name'] = 'photo.' . $f['ext'];
             $f['path'] = $photo->storeAs(Qs::getUploadPath('student').$sr->user->code, $f['name']);
             $d['photo'] = asset('storage/' . $f['path']);
+        }
+
+        if(!empty($d['dob'])) {
+            $dobBsConv = \App\Helpers\NepaliHelper::bsToAd($d['dob']);
+            if($dobBsConv) {
+                $d['dob'] = $dobBsConv;
+            }
         }
 
         $this->user->update($sr->user->id, $d); // Update User Details

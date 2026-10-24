@@ -66,9 +66,9 @@
                     <div class="row">
                         <div class="col-md-3">
                             <div class="form-group">
-                                <label>Date of Birth:</label>
-                                <input name="dob" value="{{ old('dob') }}" type="text" class="form-control date-pick" placeholder="Select Date...">
-
+                                <label>{{ __('Date of Birth (BS)') }}:</label>
+                                <input name="dob" value="{{ old('dob') }}" type="text" class="form-control nepali-date" placeholder="YYYY-MM-DD (BS)">
+                                <span class="form-text text-muted">{{ __('Nepali Bikram Sambat Date') }}</span>
                             </div>
                         </div>
 

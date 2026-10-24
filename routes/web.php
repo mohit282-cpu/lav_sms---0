@@ -146,6 +146,14 @@ Route::group(['middleware' => 'auth'], function () {
         Route::resource('dorms', 'DormController');
         Route::resource('payments', 'PaymentController');
 
+        /*************** Academic Years & Holidays (Nepal BS) *****************/
+        Route::resource('academic_years', 'AcademicYearController');
+        Route::put('academic_years/activate/{id}', 'AcademicYearController@activate')->name('academic_years.activate');
+        Route::put('academic_years/close/{id}', 'AcademicYearController@close')->name('academic_years.close');
+
+        Route::resource('holidays', 'HolidayController');
+        Route::get('calendar/events', 'HolidayController@events')->name('calendar.events');
+
     });
 
     /************************ AJAX ****************************/

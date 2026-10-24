@@ -67,9 +67,11 @@
                     <div class="row">
                         <div class="col-md-3">
                             <div class="form-group">
-                                <label>Date of Birth:</label>
-                                <input name="dob" value="{{ $sr->user->dob  }}" type="text" class="form-control date-pick" placeholder="Select Date...">
-
+                                <label>{{ __('Date of Birth (BS)') }}:</label>
+                                <input name="dob" value="{{ App\Helpers\NepaliHelper::adToBs($sr->user->dob) ?: $sr->user->dob }}" type="text" class="form-control nepali-date" placeholder="YYYY-MM-DD (BS)">
+                                @if($sr->user->dob)
+                                    <span class="form-text text-muted">{{ App\Helpers\NepaliHelper::formatDualDate($sr->user->dob) }}</span>
+                                @endif
                             </div>
                         </div>
 

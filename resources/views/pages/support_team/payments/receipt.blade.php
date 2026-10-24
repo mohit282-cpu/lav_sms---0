@@ -97,17 +97,17 @@
         <table class="td-left" style="font-size: 16px" width="100%" cellspacing="2" cellpadding="2">
            <thead>
            <tr>
-               <td class="bold">Date</td>
-               <td class="bold">Amount Paid <del style="text-decoration-style: double">N</del></td>
-               <td class="bold">Balance <del style="text-decoration-style: double">N</del></td>
+               <td class="bold">Date (मिति)</td>
+               <td class="bold">Amount Paid (रु)</td>
+               <td class="bold">Balance (रु)</td>
            </tr>
            </thead>
             <tbody>
             @foreach($receipts as $r)
                 <tr>
-                    <td>{{ date('D\, j F\, Y', strtotime($r->created_at)) }}</td>
-                    <td>{{ $r->amt_paid }}</td>
-                    <td>{{ $r->balance }}</td>
+                    <td>{{ App\Helpers\NepaliHelper::formatDualDate($r->created_at) }}</td>
+                    <td>{{ App\Helpers\NepaliHelper::formatNpr($r->amt_paid) }}</td>
+                    <td>{{ App\Helpers\NepaliHelper::formatNpr($r->balance) }}</td>
                 </tr>
                 @endforeach
             </tbody>

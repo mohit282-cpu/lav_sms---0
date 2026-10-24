@@ -212,6 +212,18 @@
 
                 {{--End Exam--}}
 
+                @if(Qs::userIsTeamSA())
+                    {{--Academic Years (Nepal BS)--}}
+                    <li class="nav-item">
+                        <a href="{{ route('academic_years.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['academic_years.index', 'academic_years.edit']) ? 'active' : '' }}"><i class="icon-calendar52"></i> <span>{{ __('Academic Years (BS)') }}</span></a>
+                    </li>
+
+                    {{--Holiday Calendar (Nepal BS)--}}
+                    <li class="nav-item">
+                        <a href="{{ route('holidays.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['holidays.index', 'holidays.edit']) ? 'active' : '' }}"><i class="icon-calendar"></i> <span>{{ __('Holiday Calendar') }}</span></a>
+                    </li>
+                @endif
+
                 @include('pages.'.Qs::getUserType().'.menu')
 
                 {{--Manage Account--}}
