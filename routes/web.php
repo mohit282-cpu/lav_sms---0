@@ -95,43 +95,6 @@ Route::group(['middleware' => 'auth'], function () {
             Route::post('pay_now/{id}', 'PaymentController@pay_now')->name('payments.pay_now');
         });
 
-        /*************** Nepal School Fee Management & Invoicing *****************/
-        Route::group(['prefix' => 'fees'], function(){
-            // Structures & Categories
-            Route::get('structures', 'FeeStructureController@index')->name('fees.structures.index');
-            Route::post('structures', 'FeeStructureController@store')->name('fees.structures.store');
-            Route::put('structures/{structure_id}', 'FeeStructureController@update')->name('fees.structures.update');
-            Route::delete('structures/{structure_id}', 'FeeStructureController@destroy')->name('fees.structures.destroy');
-            Route::post('categories', 'FeeStructureController@storeCategory')->name('fees.categories.store');
-
-            // Invoices
-            Route::get('invoices', 'InvoiceController@index')->name('fees.invoices.index');
-            Route::get('invoices/create', 'InvoiceController@create')->name('fees.invoices.create');
-            Route::post('invoices', 'InvoiceController@store')->name('fees.invoices.store');
-            Route::get('invoices/{invoice_id}', 'InvoiceController@show')->name('fees.invoices.show');
-            Route::get('invoices/{invoice_id}/print', 'InvoiceController@print')->name('fees.invoices.print');
-
-            // Payments & Receipts
-            Route::get('payments', 'FeePaymentController@index')->name('fees.payments.index');
-            Route::get('payments/create', 'FeePaymentController@create')->name('fees.payments.create');
-            Route::post('payments', 'FeePaymentController@store')->name('fees.payments.store');
-            Route::get('receipts/{payment_id}', 'FeePaymentController@receipt')->name('fees.receipts.show');
-            Route::get('receipts/{payment_id}/print', 'FeePaymentController@printReceipt')->name('fees.receipts.print');
-
-            // Student Fee Ledger
-            Route::get('ledger', 'StudentLedgerController@index')->name('fees.ledger.index');
-            Route::get('ledger/{student_id}', 'StudentLedgerController@show')->name('fees.ledger.show');
-            Route::get('ledger/{student_id}/print', 'StudentLedgerController@print')->name('fees.ledger.print');
-
-            // Adjustments & Refunds
-            Route::get('adjustments', 'FeeAdjustmentController@index')->name('fees.adjustments.index');
-            Route::get('adjustments/create', 'FeeAdjustmentController@create')->name('fees.adjustments.create');
-            Route::post('adjustments', 'FeeAdjustmentController@store')->name('fees.adjustments.store');
-
-            // Reports
-            Route::get('reports', 'FeeReportController@index')->name('fees.reports.index');
-        });
-
         /*************** Pins *****************/
         Route::group(['prefix' => 'pins'], function(){
             Route::get('create', 'PinController@create')->name('pins.create');

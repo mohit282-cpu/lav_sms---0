@@ -181,22 +181,5 @@
     "Excellent": "Excellent",
     "Very Good": "Very Good",
     "Good": "Good",
-    "Poor": "Poor",
-
-    "Fee Management": "Fee Management",
-    "Fee Structures": "Fee Structures",
-    "Fee Structures & Schedules": "Fee Structures & Schedules",
-    "Fee Invoices": "Fee Invoices",
-    "Student Fee Invoices": "Student Fee Invoices",
-    "Generate Invoices": "Generate Invoices",
-    "Fee Collections / Receipts": "Fee Collections / Receipts",
-    "Fee Payment Collections & Receipts": "Fee Payment Collections & Receipts",
-    "Student Fee Ledger": "Student Fee Ledger",
-    "Student Fee Ledger & Account Statements": "Student Fee Ledger & Account Statements",
-    "Discounts & Refunds": "Discounts & Refunds",
-    "Discounts, Waivers & Refunds Audit": "Discounts, Waivers & Refunds Audit",
-    "Financial Reports": "Financial Reports",
-    "Official Payment Receipt": "Official Payment Receipt",
-    "Record Fee Payment": "Record Fee Payment",
-    "My Fee Ledger": "My Fee Ledger"
+    "Poor": "Poor"
 }

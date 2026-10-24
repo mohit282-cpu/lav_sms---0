@@ -38,10 +38,8 @@
                                     </a>
 
                                     <div class="dropdown-menu dropdown-menu-left">
-                                        <a href="{{ route('students.show', Qs::hash($s->id)) }}" class="dropdown-item"><i class="icon-eye"></i> {{ __('View Profile') }}</a>
-                                        <a target="_blank" href="{{ route('marks.year_selector', Qs::hash($s->user->id)) }}" class="dropdown-item"><i class="icon-check"></i> {{ __('Marksheet') }}</a>
-                                        <a href="{{ route('attendance.student_history', $s->id) }}" class="dropdown-item"><i class="icon-user-check"></i> {{ __('Attendance') }}</a>
-                                        <a href="{{ route('fees.ledger.show', $s->user_id) }}" class="dropdown-item"><i class="icon-cash"></i> {{ __('Fee Ledger') }}</a>
+                                        <a href="{{ route('students.show', Qs::hash($s->id)) }}" class="dropdown-item"><i class="icon-eye"></i> View Profile</a>
+                                        <a target="_blank" href="{{ route('marks.year_selector', Qs::hash($s->user->id)) }}" class="dropdown-item"><i class="icon-check"></i> Marksheet</a>
 
                                     </div>
                                 </div>
