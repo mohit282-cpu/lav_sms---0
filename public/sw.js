@@ -1,20 +1,29 @@
 /**
  * Progressive Web App Service Worker
  * Application: Laravel School Management System (Nepal Edition)
- * Version: 1.0.0
+ * Version: 1.1.0
  *
- * Security Notice:
- * - This service worker NEVER caches authenticated HTML documents, student records,
- *   examination marks, fee payments, session tokens, or private user data.
- * - All state-changing requests (POST, PUT, PATCH, DELETE) bypass the service worker entirely.
- * - Navigation requests use a strict Network-Only strategy with fallback to a branded /offline page.
+ * Security & Cache Architecture:
+ * 1. Strict Cache Allowlist: Only verified immutable static assets (CSS, JS, fonts, icons) are cached.
+ * 2. Zero Private HTML Caching: Authenticated HTML responses, student records, exam marks,
+ *    attendance data, fee payments, and CSRF tokens are NEVER written to CacheStorage.
+ * 3. Non-GET Bypass: All state-changing requests (POST, PUT, PATCH, DELETE) bypass SW completely.
+ * 4. Response Validation: 3xx redirects, 4xx/5xx errors, opaque responses, and responses
+ *    bearing 'Cache-Control: no-store' are strictly rejected from CacheStorage.
+ * 5. Query String Isolation: URLs with dynamic or unknown query parameters are not cached.
+ * 6. Scoped Activation: Cache eviction during activation is strictly scoped to 'lav-sms-*',
+ *    preventing accidental deletion of third-party or sibling origin caches.
+ * 7. Safe Update Lifecycle: The worker does NOT skipWaiting on install; it waits until the client
+ *    confirms that no active form submissions or transactions are in-flight.
  */
 
-const CACHE_VERSION = 'lav-sms-v1.0.0';
-const PRECACHE_NAME = `lav-sms-precache-${CACHE_VERSION}`;
-const RUNTIME_STATIC_CACHE = `lav-sms-static-${CACHE_VERSION}`;
+const CACHE_VERSION = 'lav-sms-v1.1.0';
+const CACHE_PREFIX = 'lav-sms-';
+const PRECACHE_NAME = `${CACHE_PREFIX}precache-${CACHE_VERSION}`;
+const RUNTIME_STATIC_CACHE = `${CACHE_PREFIX}static-${CACHE_VERSION}`;
+const EXPECTED_CACHES = [PRECACHE_NAME, RUNTIME_STATIC_CACHE];
 
-// Pre-cached core static assets and offline fallback
+// Pre-cached core static assets and offline fallback shell
 const PRECACHE_URLS = [
     './offline',
     './assets/css/bootstrap.min.css',
@@ -38,14 +47,41 @@ const PRECACHE_URLS = [
     './assets/images/icons/icon-maskable-512x512.png'
 ];
 
+// Explicit Deny-List for Sensitive Application Endpoints
+const SENSITIVE_PATH_PATTERNS = [
+    /\/login/i,
+    /\/logout/i,
+    /\/register/i,
+    /\/password/i,
+    /\/dashboard/i,
+    /\/my_account/i,
+    /\/students/i,
+    /\/users/i,
+    /\/marks/i,
+    /\/exams/i,
+    /\/grades/i,
+    /\/payments/i,
+    /\/receipts/i,
+    /\/invoices/i,
+    /\/fees/i,
+    /\/attendance/i,
+    /\/timetables/i,
+    /\/pins/i,
+    /\/books/i,
+    /\/pwa\/push/i,
+    /\/ajax/i,
+    /\/api\//i
+];
+
 /**
- * Install Event: Pre-cache essential assets & offline page
+ * 1. Install Event: Pre-cache essential assets & offline shell
+ * Safe recovery: Uses Promise.allSettled so a single missing asset does not abort install.
+ * Safe update: Does NOT call skipWaiting() prematurely.
  */
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(PRECACHE_NAME)
             .then((cache) => {
-                // Fetch each asset gracefully so one missing asset doesn't break installation
                 return Promise.allSettled(
                     PRECACHE_URLS.map((url) => {
                         return cache.add(new Request(url, { cache: 'reload' })).catch((err) => {
@@ -54,22 +90,20 @@ self.addEventListener('install', (event) => {
                     })
                 );
             })
-            .then(() => self.skipWaiting())
     );
 });
 
 /**
- * Activate Event: Clean up outdated caches
+ * 2. Activate Event: Clean up outdated caches owned strictly by this application
  */
 self.addEventListener('activate', (event) => {
-    const expectedCaches = [PRECACHE_NAME, RUNTIME_STATIC_CACHE];
-
     event.waitUntil(
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (!expectedCaches.includes(cacheName)) {
-                        console.log(`[PWA SW] Deleting obsolete cache: ${cacheName}`);
+                    // Only delete caches starting with 'lav-sms-' that are not in EXPECTED_CACHES
+                    if (cacheName.startsWith(CACHE_PREFIX) && !EXPECTED_CACHES.includes(cacheName)) {
+                        console.log(`[PWA SW] Deleting obsolete application cache: ${cacheName}`);
                         return caches.delete(cacheName);
                     }
                 })
@@ -79,85 +113,162 @@ self.addEventListener('activate', (event) => {
 });
 
 /**
- * Fetch Event: Routing & Caching Strategies
+ * Helper: Check if response can safely be stored in CacheStorage
+ */
+function isSafeToCache(response) {
+    if (!response || response.status !== 200) {
+        return false;
+    }
+    // Reject opaque and redirected responses
+    if (response.type === 'opaque' || response.redirected) {
+        return false;
+    }
+    // Reject private/no-store responses
+    const cacheControl = response.headers.get('cache-control');
+    if (cacheControl && (cacheControl.includes('no-store') || cacheControl.includes('private'))) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Helper: Check if URL represents an approved static resource
+ */
+function isApprovedStaticAsset(url) {
+    const isStaticExt = /\.(css|js|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp)$/i.test(url.pathname);
+    if (!isStaticExt) {
+        return false;
+    }
+
+    // Must be in approved static directories on same origin OR approved font CDN
+    const isSameOrigin = url.origin === self.location.origin;
+    const isApprovedPath = isSameOrigin && (
+        url.pathname.includes('/assets/') ||
+        url.pathname.includes('/global_assets/') ||
+        url.pathname.endsWith('/manifest.json') ||
+        url.pathname.endsWith('/favicon.ico') ||
+        url.pathname.endsWith('/apple-touch-icon.png')
+    );
+
+    const isFontCdn = url.origin === 'https://fonts.googleapis.com' ||
+        url.origin === 'https://fonts.gstatic.com';
+
+    if (!isApprovedPath && !isFontCdn) {
+        return false;
+    }
+
+    // Query parameter policy: Reject dynamic queries to prevent caching user-scoped content
+    // Only allow clean URLs or explicit versioning like ?v=1.0.0
+    if (url.search) {
+        const isCleanVersionParam = /^\?v=[a-zA-Z0-9._-]+$/.test(url.search);
+        if (!isCleanVersionParam && !isFontCdn) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * 3. Fetch Event: Conservative, Secure Routing & Caching Strategies
  */
 self.addEventListener('fetch', (event) => {
     const { request } = event;
 
-    // 1. Never intercept non-GET requests (POST, PUT, PATCH, DELETE)
+    // Rule 1: Never intercept non-GET requests (POST, PUT, PATCH, DELETE)
     if (request.method !== 'GET') {
         return;
     }
 
     const url = new URL(request.url);
 
-    // 2. Ignore browser extension requests and cross-origin analytics/APIs
+    // Rule 2: Ignore browser extensions, chrome-extension, and non-http protocols
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
         return;
     }
 
-    // 3. HTML Navigation Requests (Network-First with Offline Fallback)
-    // CRITICAL: We NEVER cache dynamic HTML pages to prevent leaking private student/fee/marks data
+    // Rule 3: Deny-list check for sensitive/authenticated routes
+    const isSensitive = SENSITIVE_PATH_PATTERNS.some((pattern) => pattern.test(url.pathname));
     const isNavigation = request.mode === 'navigate' ||
         (request.headers.get('accept') && request.headers.get('accept').includes('text/html'));
 
-    if (isNavigation) {
-        event.respondWith(
-            fetch(request)
-                .then((networkResponse) => {
-                    return networkResponse;
-                })
-                .catch(async () => {
-                    // When offline, serve the pre-cached branded offline fallback page
+    if (isSensitive) {
+        if (isNavigation) {
+            // Strict Network-Only with branded offline fallback for HTML navigation
+            event.respondWith(
+                fetch(request).catch(async () => {
                     const cache = await caches.open(PRECACHE_NAME);
                     const offlineFallback = await cache.match('./offline') || await cache.match('/offline');
                     if (offlineFallback) {
                         return offlineFallback;
                     }
                     return new Response(
-                        `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Offline - School Management System</title><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#f4f6f9;color:#333;}.card{background:#fff;padding:30px;border-radius:8px;max-width:500px;margin:0 auto;box-shadow:0 4px 6px rgba(0,0,0,0.1);}</style></head><body><div class="card"><h2>Offline Mode</h2><p>You are currently offline. Please check your internet connection.</p><button onclick="window.location.reload()" style="background:#1e88e5;color:#fff;border:none;padding:10px 20px;border-radius:4px;cursor:pointer;">Retry Connection</button></div></body></html>`,
-                        {
-                            headers: { 'Content-Type': 'text/html; charset=utf-8' }
-                        }
+                        '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Offline - School Portal</title></head><body style="font-family:sans-serif;text-align:center;padding:50px;"><h2>Offline Mode</h2><p>You are currently offline. School records and live actions require an active connection.</p><button onclick="window.location.reload()">Retry Connection</button></body></html>',
+                        { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
                     );
                 })
+            );
+        } else {
+            // Network-Only for private API/AJAX requests — NEVER return cached private data
+            event.respondWith(
+                fetch(request).catch(() => {
+                    return new Response(
+                        JSON.stringify({ error: 'Network unavailable. Live server connection required.' }),
+                        { status: 503, statusText: 'Service Unavailable Offline', headers: { 'Content-Type': 'application/json' } }
+                    );
+                })
+            );
+        }
+        return;
+    }
+
+    // Rule 4: Generic HTML Navigation Requests (Network-Only with Offline Fallback)
+    // CRITICAL: We NEVER cache HTML pages in CacheStorage
+    if (isNavigation) {
+        event.respondWith(
+            fetch(request).catch(async () => {
+                const cache = await caches.open(PRECACHE_NAME);
+                const offlineFallback = await cache.match('./offline') || await cache.match('/offline');
+                if (offlineFallback) {
+                    return offlineFallback;
+                }
+                return new Response(
+                    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Offline - School Portal</title></head><body style="font-family:sans-serif;text-align:center;padding:50px;"><h2>Offline Mode</h2><p>You are currently offline. Please check your internet connection.</p><button onclick="window.location.reload()">Retry Connection</button></body></html>',
+                    { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+                );
+            })
         );
         return;
     }
 
-    // 4. Static Assets (CSS, JS, Fonts, Images): Cache-First with Network Revalidation
-    const isStaticAsset = /\.(css|js|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp)$/i.test(url.pathname);
-
-    if (isStaticAsset) {
+    // Rule 5: Approved Static Assets Only (CSS, JS, Fonts, Images)
+    if (isApprovedStaticAsset(url)) {
         event.respondWith(
             caches.match(request).then((cachedResponse) => {
                 if (cachedResponse) {
-                    // Return cached asset immediately, revalidate in background
-                    fetch(request).then((networkResponse) => {
-                        if (networkResponse && networkResponse.status === 200) {
-                            caches.open(RUNTIME_STATIC_CACHE).then((cache) => {
-                                cache.put(request, networkResponse.clone());
-                            });
-                        }
-                    }).catch(() => { /* Network failed, cached response was already served */ });
-
+                    // Return cached asset immediately, revalidate in background when online
+                    if (navigator.onLine) {
+                        fetch(request).then((networkResponse) => {
+                            if (isSafeToCache(networkResponse)) {
+                                caches.open(RUNTIME_STATIC_CACHE).then((cache) => {
+                                    cache.put(request, networkResponse.clone());
+                                });
+                            }
+                        }).catch(() => { /* Background revalidation failed gracefully */ });
+                    }
                     return cachedResponse;
                 }
 
-                // Not in cache: fetch from network and cache
+                // Not in cache: fetch from network and store if eligible
                 return fetch(request).then((networkResponse) => {
-                    if (!networkResponse || networkResponse.status !== 200 || networkResponse.type === 'opaque') {
-                        return networkResponse;
+                    if (isSafeToCache(networkResponse)) {
+                        const responseToCache = networkResponse.clone();
+                        caches.open(RUNTIME_STATIC_CACHE).then((cache) => {
+                            cache.put(request, responseToCache);
+                        });
                     }
-
-                    const responseToCache = networkResponse.clone();
-                    caches.open(RUNTIME_STATIC_CACHE).then((cache) => {
-                        cache.put(request, responseToCache);
-                    });
-
                     return networkResponse;
                 }).catch(() => {
-                    // Asset fetch failed and not cached
                     return new Response('', { status: 408, statusText: 'Asset Unavailable Offline' });
                 });
             })
@@ -165,21 +276,22 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // Default: Normal network fetch
+    // Rule 6: Default fallback — Pass through to network without caching
     event.respondWith(fetch(request));
 });
 
 /**
- * Message Event: Client commands (e.g. skip waiting on update)
+ * 4. Message Event: Safe update activation command from client
  */
 self.addEventListener('message', (event) => {
     if (event.data && event.data.action === 'SKIP_WAITING') {
+        console.log('[PWA SW] Safe update approved: activating new service worker...');
         self.skipWaiting();
     }
 });
 
 /**
- * Push Notification Event
+ * 5. Push Notification Event
  */
 self.addEventListener('push', (event) => {
     let data = {
@@ -215,7 +327,7 @@ self.addEventListener('push', (event) => {
 });
 
 /**
- * Notification Click Event
+ * 6. Notification Click Event
  */
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();

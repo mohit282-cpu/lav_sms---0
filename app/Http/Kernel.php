@@ -71,5 +71,6 @@ class Kernel extends HttpKernel
         'teamLibrary' => \App\Http\Middleware\Custom\TeamLibrary::class,
         'examIsLocked' => \App\Http\Middleware\Custom\ExamIsLocked::class,
         'my_parent' => \App\Http\Middleware\Custom\MyParent::class,
+        'no_store' => \App\Http\Middleware\NoStorePrivateResponses::class,
     ];
 }

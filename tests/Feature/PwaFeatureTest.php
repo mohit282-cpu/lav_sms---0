@@ -246,6 +246,149 @@ class PwaFeatureTest extends TestCase
             $this->assertEquals((int)$declaredH, $imageInfo[1], "Height mismatch for {$src}");
         }
     }
+
+    /**
+     * Test sensitive authenticated routes return strict no-store cache headers
+     */
+    public function test_authenticated_routes_have_strict_no_store_headers()
+    {
+        $this->actingAs($this->admin);
+
+        $sensitiveEndpoints = [
+            route('dashboard'),
+            route('my_account'),
+            route('payments.index'),
+        ];
+
+        foreach ($sensitiveEndpoints as $url) {
+            $response = $this->get($url);
+            $response->assertStatus(200);
+
+            $cacheControl = $response->headers->get('Cache-Control');
+            $this->assertNotNull($cacheControl, "Missing Cache-Control on {$url}");
+            $this->assertStringContainsString('no-store', $cacheControl, "Missing no-store on {$url}");
+            $this->assertStringContainsString('no-cache', $cacheControl, "Missing no-cache on {$url}");
+            $this->assertStringContainsString('must-revalidate', $cacheControl, "Missing must-revalidate on {$url}");
+            $this->assertEquals('no-cache', $response->headers->get('Pragma'), "Missing Pragma: no-cache on {$url}");
+        }
+    }
+
+    /**
+     * Test login page has no-store cache headers and declares null PWA user ID
+     */
+    public function test_login_page_has_no_store_headers_and_declares_null_user_id()
+    {
+        $response = $this->get('/login');
+
+        $response->assertStatus(200);
+        $cacheControl = $response->headers->get('Cache-Control');
+        $this->assertStringContainsString('no-store', $cacheControl);
+        $this->assertEquals('no-cache', $response->headers->get('Pragma'));
+        $response->assertSee('window.PWA_USER_ID = null;', false);
+    }
+
+    /**
+     * Test public PWA endpoints retain appropriate caching headers
+     */
+    public function test_public_routes_retain_appropriate_cache_headers()
+    {
+        $manifestRes = $this->get('/manifest.json');
+        $manifestRes->assertStatus(200);
+        $this->assertStringContainsString('max-age=3600', $manifestRes->headers->get('Cache-Control'));
+        $this->assertStringContainsString('public', $manifestRes->headers->get('Cache-Control'));
+
+        $offlineRes = $this->get('/offline');
+        $offlineRes->assertStatus(200);
+        $this->assertStringContainsString('max-age=86400', $offlineRes->headers->get('Cache-Control'));
+        $this->assertStringContainsString('public', $offlineRes->headers->get('Cache-Control'));
+
+        $swRes = $this->get('/sw.js');
+        $swRes->assertStatus(200);
+        $this->assertStringContainsString('no-cache', $swRes->headers->get('Cache-Control'));
+        $this->assertStringContainsString('no-store', $swRes->headers->get('Cache-Control'));
+    }
+
+    /**
+     * Test service worker implements explicit cache allowlist, response validation, and sensitive denylist
+     */
+    public function test_service_worker_implements_cache_allowlist_and_response_validation()
+    {
+        $swPath = public_path('sw.js');
+        $this->assertFileExists($swPath);
+        $content = file_get_contents($swPath);
+
+        // Check non-GET bypass
+        $this->assertStringContainsString("request.method !== 'GET'", $content);
+
+        // Check sensitive path denylist
+        $this->assertStringContainsString('SENSITIVE_PATH_PATTERNS', $content);
+        $this->assertStringContainsString('/students/i', $content);
+        $this->assertStringContainsString('/marks/i', $content);
+        $this->assertStringContainsString('/payments/i', $content);
+        $this->assertStringContainsString('/attendance/i', $content);
+        $this->assertStringContainsString('/login/i', $content);
+
+        // Check response validation (reject opaque, 3xx redirects, 4xx/5xx, no-store)
+        $this->assertStringContainsString('isSafeToCache', $content);
+        $this->assertStringContainsString("response.type === 'opaque'", $content);
+        $this->assertStringContainsString('response.redirected', $content);
+        $this->assertStringContainsString("cacheControl.includes('no-store')", $content);
+
+        // Check static asset allowlist and query string isolation
+        $this->assertStringContainsString('isApprovedStaticAsset', $content);
+        $this->assertStringContainsString('/assets/', $content);
+        $this->assertStringContainsString('/global_assets/', $content);
+        $this->assertStringContainsString('isCleanVersionParam', $content);
+
+        // Check application-scoped cache cleanup
+        $this->assertStringContainsString("cacheName.startsWith(CACHE_PREFIX)", $content);
+        $this->assertStringContainsString("EXPECTED_CACHES.includes(cacheName)", $content);
+    }
+
+    /**
+     * Test service worker does not call skipWaiting automatically on install
+     */
+    public function test_service_worker_lifecycle_does_not_skip_waiting_on_install()
+    {
+        $swPath = public_path('sw.js');
+        $content = file_get_contents($swPath);
+
+        // Find install event block
+        preg_match('/addEventListener\(\s*[\'"]install[\'"]\s*,\s*\((?:event)?\)\s*=>\s*\{(.*?)\}\);/s', $content, $matches);
+        $this->assertNotEmpty($matches, 'Could not locate install event in sw.js');
+
+        $installBody = $matches[1];
+        $this->assertStringNotContainsString('self.skipWaiting()', $installBody, 'Service worker must not skipWaiting prematurely on install');
+
+        // Confirm message event handles skipWaiting safely on client signal
+        $this->assertStringContainsString("event.data.action === 'SKIP_WAITING'", $content);
+    }
+
+    /**
+     * Test PWA client script implements update state machine and transaction locking
+     */
+    public function test_pwa_client_implements_update_state_machine_and_transaction_locking()
+    {
+        $pwaJsPath = public_path('assets/js/pwa.js');
+        $content = file_get_contents($pwaJsPath);
+
+        // Verify state machine definition
+        $this->assertStringContainsString('PwaUpdateStateMachine', $content);
+        $this->assertStringContainsString('STATE_IDLE', $content);
+        $this->assertStringContainsString('STATE_TRANSACTION_PENDING', $content);
+        $this->assertStringContainsString('STATE_UPDATE_AVAILABLE', $content);
+        $this->assertStringContainsString('STATE_UPDATING', $content);
+
+        // Verify transaction hooks (submit & jQuery AJAX)
+        $this->assertStringContainsString("document.addEventListener('submit'", $content);
+        $this->assertStringContainsString('PwaUpdateStateMachine.startTransaction()', $content);
+        $this->assertStringContainsString('ajaxStart', $content);
+        $this->assertStringContainsString('ajaxStop', $content);
+
+        // Verify controllerchange recheck before reload
+        $this->assertStringContainsString('isSafeToUpdate()', $content);
+        $this->assertStringContainsString('window.location.reload()', $content);
+    }
 }
 
 

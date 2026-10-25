@@ -1,6 +1,7 @@
 <?php
-
-Auth::routes();
+Route::group(['middleware' => 'no_store'], function () {
+    Auth::routes();
+});
 
 //Route::get('/test', 'TestController@index')->name('test');
 Route::get('/privacy-policy', 'HomeController@privacy_policy')->name('privacy_policy');
@@ -12,7 +13,7 @@ Route::get('/manifest.json', 'PwaController@manifest')->name('pwa.manifest');
 Route::get('/offline', 'PwaController@offline')->name('pwa.offline');
 Route::get('/sw.js', 'PwaController@serviceWorker')->name('pwa.sw');
 
-Route::group(['middleware' => 'auth'], function () {
+Route::group(['middleware' => ['auth', 'no_store']], function () {
     /* PWA Push Subscription Endpoints */
     Route::post('/pwa/push/subscribe', 'PwaController@subscribe')->name('pwa.push.subscribe');
     Route::post('/pwa/push/unsubscribe', 'PwaController@unsubscribe')->name('pwa.push.unsubscribe');

@@ -22,6 +22,7 @@
 {{-- PWA Scripts and Configuration --}}
 <script>
     window.PWA_SW_PATH = "{{ route('pwa.sw') }}";
+    window.PWA_USER_ID = null;
     window.PWA_ICON_PATH = "{{ asset('assets/images/icons/icon-192x192.png') }}";
     window.PWA_APP_NAME = "{{ Qs::getSystemName() }}";
     window.PWA_I18N_UPDATE = "{{ __('A new version of the school portal is ready.') }}";

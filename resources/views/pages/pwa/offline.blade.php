@@ -135,9 +135,9 @@
         <div class="feature-box">
             <strong>{{ __('Important School System Guidelines / महत्त्वपूर्ण जानकारी:') }}</strong>
             <ul>
-                <li>{{ __('Offline Ready: You can browse previously cached pages and static catalogue information.') }}</li>
-                <li>{{ __('Live Actions: Recording attendance, publishing marks, generating invoices, and fee payments strictly require a live server connection for audit safety.') }}</li>
-                <li>{{ __('Data Security: Private examination marks and confidential student financial records are never saved in unencrypted browser caches.') }}</li>
+                <li>{{ __('Offline Shell: Core layout design and branding assets remain available while disconnected.') }}</li>
+                <li>{{ __('Live Records Required: Student records, examination marks, and attendance data are never stored in browser caches to protect student privacy.') }}</li>
+                <li>{{ __('Audit Safety: Recording attendance, publishing marks, generating invoices, and processing fee payments strictly require a live server connection.') }}</li>
             </ul>
         </div>
 

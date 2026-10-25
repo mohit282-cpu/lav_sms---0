@@ -1,6 +1,15 @@
 /**
  * Progressive Web App Client Module
  * Application: Laravel School Management System (Nepal Edition)
+ * Version: 1.1.0
+ *
+ * Core Features:
+ * 1. Safe Service Worker Lifecycle with Transaction State Machine
+ * 2. User-Facing Update Prompt (Deferred during active form/financial submissions)
+ * 3. BeforeInstallPrompt Banner & Install Handling
+ * 4. Online/Offline Connectivity Status Indicators
+ * 5. Web Push Notification Subscriptions
+ * 6. Isolated, Scoped Offline Attendance Drafts (Data-minimized & Purged on Logout)
  */
 
 (function () {
@@ -8,32 +17,146 @@
 
     var deferredInstallPrompt = null;
     var newWorkerWaiting = null;
-    var isSubmittingForm = false;
-
-    // Detect if user is currently submitting a form or making a transaction
-    document.addEventListener('submit', function () {
-        isSubmittingForm = true;
-        setTimeout(function () {
-            isSubmittingForm = false;
-        }, 15000);
-    }, true);
 
     /**
-     * 1. Service Worker Registration & Lifecycle
+     * Update State Machine
+     * States:
+     * - IDLE: No pending background update, no in-flight transaction
+     * - TRANSACTION_PENDING: Form submission or AJAX operation currently in-flight
+     * - UPDATE_AVAILABLE: A new service worker is installed and waiting for user activation
+     * - UPDATING: User activated update; sending SKIP_WAITING and refreshing safely
+     */
+    var PwaUpdateStateMachine = {
+        STATE_IDLE: 'IDLE',
+        STATE_TRANSACTION_PENDING: 'TRANSACTION_PENDING',
+        STATE_UPDATE_AVAILABLE: 'UPDATE_AVAILABLE',
+        STATE_UPDATING: 'UPDATING',
+
+        state: 'IDLE',
+        pendingTransactions: 0,
+        transactionWatchdog: null,
+
+        getState: function () {
+            return this.state;
+        },
+
+        startTransaction: function () {
+            this.pendingTransactions++;
+            this.state = this.STATE_TRANSACTION_PENDING;
+
+            // Clear any previous watchdog
+            if (this.transactionWatchdog) {
+                clearTimeout(this.transactionWatchdog);
+            }
+
+            // Safety watchdog: After 25 seconds without activity, automatically release lock
+            // to prevent network failures or uncaught errors from freezing update capabilities permanently
+            var self = this;
+            this.transactionWatchdog = setTimeout(function () {
+                console.warn('[PWA] Transaction watchdog triggered. Releasing stale transaction lock.');
+                self.resetTransactions();
+            }, 25000);
+
+            this.updateUiState();
+        },
+
+        endTransaction: function () {
+            if (this.pendingTransactions > 0) {
+                this.pendingTransactions--;
+            }
+
+            if (this.pendingTransactions === 0) {
+                if (this.transactionWatchdog) {
+                    clearTimeout(this.transactionWatchdog);
+                    this.transactionWatchdog = null;
+                }
+
+                if (newWorkerWaiting) {
+                    this.state = this.STATE_UPDATE_AVAILABLE;
+                } else {
+                    this.state = this.STATE_IDLE;
+                }
+            }
+
+            this.updateUiState();
+        },
+
+        resetTransactions: function () {
+            this.pendingTransactions = 0;
+            if (this.transactionWatchdog) {
+                clearTimeout(this.transactionWatchdog);
+                this.transactionWatchdog = null;
+            }
+
+            if (newWorkerWaiting) {
+                this.state = this.STATE_UPDATE_AVAILABLE;
+            } else {
+                this.state = this.STATE_IDLE;
+            }
+
+            this.updateUiState();
+        },
+
+        isSafeToUpdate: function () {
+            return this.state !== this.STATE_TRANSACTION_PENDING && this.pendingTransactions === 0;
+        },
+
+        updateUiState: function () {
+            var updateBtn = document.getElementById('pwa-update-btn');
+            if (!updateBtn) return;
+
+            if (this.state === this.STATE_TRANSACTION_PENDING) {
+                updateBtn.setAttribute('data-disabled', 'true');
+                updateBtn.style.opacity = '0.6';
+            } else {
+                updateBtn.removeAttribute('data-disabled');
+                updateBtn.style.opacity = '1';
+            }
+        }
+    };
+
+    // Attach transaction listeners to all forms and jQuery AJAX if present
+    document.addEventListener('submit', function (e) {
+        // Exclude logout form from blocking updates
+        if (e.target && (e.target.id === 'logout-form' || (e.target.action && e.target.action.indexOf('logout') !== -1))) {
+            return;
+        }
+        PwaUpdateStateMachine.startTransaction();
+    }, true);
+
+    // Release transaction lock on pageshow or navigation away
+    window.addEventListener('pageshow', function () {
+        PwaUpdateStateMachine.resetTransactions();
+    });
+
+    // jQuery integration for AJAX transactions (attendance, marks, payment modals)
+    if (window.jQuery) {
+        window.jQuery(document).ajaxStart(function () {
+            PwaUpdateStateMachine.startTransaction();
+        });
+        window.jQuery(document).ajaxStop(function () {
+            PwaUpdateStateMachine.endTransaction();
+        });
+        window.jQuery(document).ajaxError(function () {
+            PwaUpdateStateMachine.endTransaction();
+        });
+    }
+
+    /**
+     * 1. Service Worker Registration & Safe Lifecycle
      */
     function registerServiceWorker() {
         if (!('serviceWorker' in navigator)) {
             return;
         }
 
-        // Determine base path for sw.js (supports subdirectories)
         var swPath = window.PWA_SW_PATH || './sw.js';
 
         navigator.serviceWorker.register(swPath, { scope: './' })
             .then(function (registration) {
                 console.log('[PWA] Service Worker registered with scope:', registration.scope);
 
-                // Check for updates
+                // Listen for waiting service workers
                 registration.addEventListener('updatefound', function () {
                     var installingWorker = registration.installing;
                     if (!installingWorker) return;
@@ -41,6 +164,9 @@
                     installingWorker.addEventListener('statechange', function () {
                         if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
                             newWorkerWaiting = installingWorker;
+                            if (PwaUpdateStateMachine.isSafeToUpdate()) {
+                                PwaUpdateStateMachine.state = PwaUpdateStateMachine.STATE_UPDATE_AVAILABLE;
+                            }
                             showUpdateNotification();
                         }
                     });
@@ -48,6 +174,9 @@
 
                 if (registration.waiting && navigator.serviceWorker.controller) {
                     newWorkerWaiting = registration.waiting;
+                    if (PwaUpdateStateMachine.isSafeToUpdate()) {
+                        PwaUpdateStateMachine.state = PwaUpdateStateMachine.STATE_UPDATE_AVAILABLE;
+                    }
                     showUpdateNotification();
                 }
             })
@@ -55,10 +184,24 @@
                 console.warn('[PWA] Service Worker registration failed:', error);
             });
 
-        // Handle controller change (reloads after skipWaiting only if safe)
+        // Handle controller change (reloads only after user-confirmed update and when no transaction is pending)
         var refreshing = false;
         navigator.serviceWorker.addEventListener('controllerchange', function () {
-            if (refreshing || isSubmittingForm) return;
+            if (refreshing) return;
+
+            // Strict safety check before reload
+            if (!PwaUpdateStateMachine.isSafeToUpdate()) {
+                console.warn('[PWA] Controller changed during pending transaction. Delaying reload until transaction completes.');
+                var checkInterval = setInterval(function () {
+                    if (PwaUpdateStateMachine.isSafeToUpdate()) {
+                        clearInterval(checkInterval);
+                        refreshing = true;
+                        window.location.reload();
+                    }
+                }, 500);
+                return;
+            }
+
             refreshing = true;
             window.location.reload();
         });
@@ -72,21 +215,31 @@
         if (!banner) {
             banner = document.createElement('div');
             banner.id = 'pwa-update-banner';
-            banner.innerHTML = '<span>' + (window.PWA_I18N_UPDATE || 'New version available!') + '</span>' +
+            banner.innerHTML =
+                '<span id="pwa-update-msg">' + (window.PWA_I18N_UPDATE || 'A new version of the school portal is ready.') + '</span>' +
                 '<button type="button" id="pwa-update-btn">' + (window.PWA_I18N_UPDATE_BTN || 'Update Now') + '</button>';
             document.body.appendChild(banner);
 
             document.getElementById('pwa-update-btn').addEventListener('click', function () {
-                if (isSubmittingForm) {
-                    alert('Please wait until your current action completes before updating.');
+                // Check if user is currently submitting a form or recording data
+                if (!PwaUpdateStateMachine.isSafeToUpdate()) {
+                    alert('Please wait until your current action or form submission completes before updating.');
                     return;
                 }
+
                 if (newWorkerWaiting) {
+                    PwaUpdateStateMachine.state = PwaUpdateStateMachine.STATE_UPDATING;
+                    var btn = document.getElementById('pwa-update-btn');
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.innerText = 'Updating...';
+                    }
                     newWorkerWaiting.postMessage({ action: 'SKIP_WAITING' });
                 }
             });
         }
         banner.style.display = 'flex';
+        PwaUpdateStateMachine.updateUiState();
     }
 
     /**
@@ -96,7 +249,7 @@
         e.preventDefault();
         deferredInstallPrompt = e;
 
-        // Check if user dismissed prompt recently (7 days cooldown)
+        // Check 7-day cooldown
         var dismissedUntil = localStorage.getItem('pwa_install_dismissed_until');
         if (dismissedUntil && parseInt(dismissedUntil, 10) > Date.now()) {
             return;
@@ -117,7 +270,7 @@
                 '<img src="' + iconSrc + '" alt="App Icon" class="pwa-banner-icon">' +
                 '<div class="pwa-banner-content">' +
                 '  <div class="pwa-banner-title">' + appName + '</div>' +
-                '  <p class="pwa-banner-desc">' + (window.PWA_I18N_INSTALL_DESC || 'Install school portal for quick offline access') + '</p>' +
+                '  <p class="pwa-banner-desc">' + (window.PWA_I18N_INSTALL_DESC || 'Install school portal for quick and reliable access') + '</p>' +
                 '</div>' +
                 '<div class="pwa-banner-actions">' +
                 '  <button type="button" class="pwa-btn-install" id="pwa-btn-trigger-install">' + (window.PWA_I18N_INSTALL_BTN || 'Install') + '</button>' +
@@ -140,7 +293,6 @@
                 console.log('[PWA] User accepted the install prompt');
             } else {
                 console.log('[PWA] User dismissed the install prompt');
-                // Cooldown 7 days
                 localStorage.setItem('pwa_install_dismissed_until', Date.now() + (7 * 24 * 60 * 60 * 1000));
             }
             deferredInstallPrompt = null;
@@ -152,7 +304,6 @@
     function dismissInstallBanner() {
         var banner = document.getElementById('pwa-install-banner');
         if (banner) banner.style.display = 'none';
-        // Cooldown 7 days
         localStorage.setItem('pwa_install_dismissed_until', Date.now() + (7 * 24 * 60 * 60 * 1000));
     }
 
@@ -366,6 +517,9 @@
 
     // Run session isolation check immediately
     enforceUserSessionIsolation();
+
+    // Export state machine for testing and monitoring
+    window.PwaUpdateStateMachine = PwaUpdateStateMachine;
 
     // Initialize on DOM load
     if (document.readyState === 'loading') {
