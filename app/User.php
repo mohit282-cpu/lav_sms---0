@@ -117,4 +117,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(\App\Models\BookRequest::class, 'user_id');
     }
+
+    public function pushSubscriptions()
+    {
+        return $this->hasMany(\App\Models\PushSubscription::class, 'user_id');
+    }
 }

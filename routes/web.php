@@ -7,8 +7,16 @@ Route::get('/privacy-policy', 'HomeController@privacy_policy')->name('privacy_po
 Route::get('/terms-of-use', 'HomeController@terms_of_use')->name('terms_of_use');
 Route::get('/locale/{lang}', 'HomeController@set_locale')->name('set_locale');
 
+/* Progressive Web App (PWA) Routes */
+Route::get('/manifest.json', 'PwaController@manifest')->name('pwa.manifest');
+Route::get('/offline', 'PwaController@offline')->name('pwa.offline');
+Route::get('/sw.js', 'PwaController@serviceWorker')->name('pwa.sw');
 
 Route::group(['middleware' => 'auth'], function () {
+    /* PWA Push Subscription Endpoints */
+    Route::post('/pwa/push/subscribe', 'PwaController@subscribe')->name('pwa.push.subscribe');
+    Route::post('/pwa/push/unsubscribe', 'PwaController@unsubscribe')->name('pwa.push.unsubscribe');
+
 
     Route::get('/', 'HomeController@dashboard')->name('home');
     Route::get('/home', 'HomeController@dashboard')->name('home');

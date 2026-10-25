@@ -44,4 +44,18 @@
 <script src=" {{ asset('assets/js/custom.js') }} "></script>
 <script src=" {{ asset('assets/js/nepali_datepicker.js') }} "></script>
 
+{{-- PWA Scripts and Configuration --}}
+<script>
+    window.PWA_SW_PATH = "{{ route('pwa.sw') }}";
+    window.PWA_ICON_PATH = "{{ asset('assets/images/icons/icon-192x192.png') }}";
+    window.PWA_APP_NAME = "{{ Qs::getSystemName() }}";
+    window.PWA_I18N_UPDATE = "{{ __('A new version of the school portal is ready.') }}";
+    window.PWA_I18N_UPDATE_BTN = "{{ __('Update Now') }}";
+    window.PWA_I18N_INSTALL_DESC = "{{ __('Install school portal for quick and reliable access') }}";
+    window.PWA_I18N_INSTALL_BTN = "{{ __('Install App') }}";
+    window.PWA_I18N_ONLINE = "{{ __('Connection Restored') }}";
+    window.PWA_I18N_OFFLINE = "{{ __('Offline Mode - Live actions require connection') }}";
+</script>
+<script src="{{ asset('assets/js/pwa.js') }}"></script>
+
 @include('partials.js.custom_js')

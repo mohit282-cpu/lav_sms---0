@@ -17,10 +17,10 @@ class UsersTableSeeder extends Seeder
      */
     public function run()
     {
-        DB::table('users')->delete();
-
         $this->createNewUsers();
-        $this->createManyUsers( 3);
+        if (DB::table('users')->count() < 8) {
+            $this->createManyUsers(3);
+        }
     }
 
     protected function createNewUsers()
@@ -83,7 +83,9 @@ class UsersTableSeeder extends Seeder
                 'remember_token' => Str::random(10),
             ],
         ];
-        DB::table('users')->insert($d);
+        foreach ($d as $u) {
+            DB::table('users')->updateOrInsert(['username' => $u['username']], $u);
+        }
     }
 
     protected function createManyUsers(int $count)
