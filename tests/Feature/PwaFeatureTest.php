@@ -170,4 +170,38 @@ class PwaFeatureTest extends TestCase
             'endpoint_hash' => hash('sha256', $endpoint),
         ]);
     }
+
+    /**
+     * Test PWA client script implements user-scoped storage, data minimization, and logout purge
+     */
+    public function test_pwa_script_implements_attendance_privacy_safeguards()
+    {
+        $pwaJsPath = public_path('assets/js/pwa.js');
+        $this->assertFileExists($pwaJsPath);
+
+        $content = file_get_contents($pwaJsPath);
+
+        // Verify user-scoped key
+        $this->assertStringContainsString('lav_sms_att_drafts_uid_', $content);
+
+        // Verify logout purge handler
+        $this->assertStringContainsString('purgeAllAttendanceDrafts', $content);
+        $this->assertStringContainsString('logout', $content);
+
+        // Verify data minimization (only status codes P, A, L, H)
+        $this->assertStringContainsString("'P', 'A', 'L', 'H'", $content);
+    }
+
+    /**
+     * Test layout injects authenticated user ID for PWA session isolation
+     */
+    public function test_layout_injects_authenticated_user_id()
+    {
+        $this->actingAs($this->admin);
+
+        $response = $this->get(route('dashboard'));
+        $response->assertStatus(200);
+        $response->assertSee("window.PWA_USER_ID = {$this->admin->id};", false);
+    }
 }
+

@@ -25,91 +25,103 @@ class UsersTableSeeder extends Seeder
 
     protected function createNewUsers()
     {
-        $password = Hash::make('cj'); // Default user password
+        $defaultPassword = Hash::make('cj'); // Default initial password for newly created demo accounts
 
-        $d = [
-
-            ['name' => 'CJ Inspired',
+        $defaultUsers = [
+            [
+                'name' => 'CJ Inspired',
                 'email' => 'cj@cj.com',
                 'username' => 'cj',
-                'password' => $password,
+                'password' => $defaultPassword,
                 'user_type' => 'super_admin',
                 'code' => strtoupper(Str::random(10)),
                 'remember_token' => Str::random(10),
             ],
-
-            ['name' => 'Admin KORA',
-            'email' => 'admin@admin.com',
-            'password' => $password,
-            'user_type' => 'admin',
-            'username' => 'admin',
-            'code' => strtoupper(Str::random(10)),
-            'remember_token' => Str::random(10),
+            [
+                'name' => 'Admin KORA',
+                'email' => 'admin@admin.com',
+                'password' => $defaultPassword,
+                'user_type' => 'admin',
+                'username' => 'admin',
+                'code' => strtoupper(Str::random(10)),
+                'remember_token' => Str::random(10),
             ],
-
-            ['name' => 'Teacher Chike',
+            [
+                'name' => 'Teacher Chike',
                 'email' => 'teacher@teacher.com',
                 'user_type' => 'teacher',
                 'username' => 'teacher',
-                'password' => $password,
+                'password' => $defaultPassword,
                 'code' => strtoupper(Str::random(10)),
                 'remember_token' => Str::random(10),
             ],
-
-            ['name' => 'Parent Kaba',
+            [
+                'name' => 'Parent Kaba',
                 'email' => 'parent@parent.com',
                 'user_type' => 'parent',
                 'username' => 'parent',
-                'password' => $password,
+                'password' => $defaultPassword,
                 'code' => strtoupper(Str::random(10)),
                 'remember_token' => Str::random(10),
             ],
-
-            ['name' => 'Accountant Jeff',
+            [
+                'name' => 'Accountant Jeff',
                 'email' => 'accountant@accountant.com',
                 'user_type' => 'accountant',
                 'username' => 'accountant',
-                'password' => $password,
+                'password' => $defaultPassword,
                 'code' => strtoupper(Str::random(10)),
                 'remember_token' => Str::random(10),
             ],
-
-            ['name' => 'Librarian Sita',
+            [
+                'name' => 'Librarian Sita',
                 'email' => 'librarian@librarian.com',
                 'user_type' => 'librarian',
                 'username' => 'librarian',
-                'password' => $password,
+                'password' => $defaultPassword,
                 'code' => strtoupper(Str::random(10)),
                 'remember_token' => Str::random(10),
             ],
         ];
-        foreach ($d as $u) {
-            DB::table('users')->updateOrInsert(['username' => $u['username']], $u);
+
+        foreach ($defaultUsers as $user) {
+            $exists = DB::table('users')
+                ->where('username', $user['username'])
+                ->orWhere('email', $user['email'])
+                ->exists();
+
+            if (!$exists) {
+                DB::table('users')->insert($user);
+            }
         }
     }
 
     protected function createManyUsers(int $count)
     {
-        $data = [];
-        $user_type = Qs::getAllUserTypes(['super_admin', 'librarian', 'student']);
+        $userTypes = Qs::getAllUserTypes(['super_admin', 'librarian', 'student']);
 
-        for($i = 1; $i <= $count; $i++){
+        for ($i = 1; $i <= $count; $i++) {
+            foreach ($userTypes as $ut) {
+                $username = $ut . $i;
+                $email = $ut . $i . '@' . $ut . '.com';
 
-            foreach ($user_type as $k => $ut){
+                $exists = DB::table('users')
+                    ->where('username', $username)
+                    ->orWhere('email', $email)
+                    ->exists();
 
-                $data[] = ['name' => ucfirst($user_type[$k]).' '.$i,
-                    'email' => $user_type[$k].$i.'@'.$user_type[$k].'.com',
-                    'user_type' => $user_type[$k],
-                    'username' => $user_type[$k].$i,
-                    'password' => Hash::make($user_type[$k]),
-                    'code' => strtoupper(Str::random(10)),
-                    'remember_token' => Str::random(10),
-                ];
-
+                if (!$exists) {
+                    DB::table('users')->insert([
+                        'name' => ucfirst($ut) . ' ' . $i,
+                        'email' => $email,
+                        'user_type' => $ut,
+                        'username' => $username,
+                        'password' => Hash::make($ut),
+                        'code' => strtoupper(Str::random(10)),
+                        'remember_token' => Str::random(10),
+                    ]);
+                }
             }
-
         }
-
-        DB::table('users')->insert($data);
     }
 }

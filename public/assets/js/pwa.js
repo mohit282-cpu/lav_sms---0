@@ -265,37 +265,107 @@
     }
 
     /**
-     * 6. Offline Attendance Drafts Module
+     * 6. Offline Attendance Drafts Module (Privacy & Session Isolated)
      */
+    function purgeAllAttendanceDrafts() {
+        for (var i = localStorage.length - 1; i >= 0; i--) {
+            var key = localStorage.key(i);
+            if (key && (key.indexOf('lav_sms_att_') === 0 || key === 'lav_sms_attendance_drafts')) {
+                localStorage.removeItem(key);
+            }
+        }
+    }
+
+    function enforceUserSessionIsolation() {
+        var currentUserId = window.PWA_USER_ID ? String(window.PWA_USER_ID) : null;
+        var lastKnownUser = localStorage.getItem('lav_sms_active_uid');
+
+        if (lastKnownUser !== currentUserId) {
+            purgeAllAttendanceDrafts();
+            if (currentUserId) {
+                localStorage.setItem('lav_sms_active_uid', currentUserId);
+            } else {
+                localStorage.removeItem('lav_sms_active_uid');
+            }
+        }
+    }
+
+    // Purge drafts on explicit logout click or logout form submission
+    document.addEventListener('click', function (e) {
+        var target = e.target && e.target.closest ? e.target.closest('a[href*="logout"]') : null;
+        if (target) {
+            purgeAllAttendanceDrafts();
+        }
+    });
+
+    document.addEventListener('submit', function (e) {
+        if (e.target && (e.target.id === 'logout-form' || (e.target.action && e.target.action.indexOf('logout') !== -1))) {
+            purgeAllAttendanceDrafts();
+        }
+    });
+
     window.PwaAttendance = {
-        STORAGE_KEY: 'lav_sms_attendance_drafts',
+        getStorageKey: function () {
+            var userId = window.PWA_USER_ID;
+            return userId ? 'lav_sms_att_drafts_uid_' + userId : null;
+        },
         saveDraft: function (classId, sectionId, dateBs, records) {
+            var storageKey = this.getStorageKey();
+            if (!storageKey) {
+                console.warn('[PWA Attendance] Draft saving skipped: Unauthenticated user.');
+                return null;
+            }
+
+            // Data minimization: Store ONLY student IDs and validated status codes ('P','A','L','H')
+            var sanitizedRecords = {};
+            if (typeof records === 'object' && records !== null) {
+                for (var stId in records) {
+                    if (Object.prototype.hasOwnProperty.call(records, stId) && /^\d+$/.test(stId)) {
+                        var status = String(records[stId]).trim().toUpperCase();
+                        if (['P', 'A', 'L', 'H'].indexOf(status) !== -1) {
+                            sanitizedRecords[parseInt(stId, 10)] = status;
+                        }
+                    }
+                }
+            }
+
             var drafts = this.getDrafts();
             var draftKey = classId + '_' + sectionId + '_' + dateBs;
             drafts[draftKey] = {
-                class_id: classId,
-                section_id: sectionId,
-                date_bs: dateBs,
-                records: records,
+                draft_id: 'draft_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+                class_id: parseInt(classId, 10),
+                section_id: parseInt(sectionId, 10),
+                date_bs: String(dateBs).trim(),
+                records: sanitizedRecords,
                 saved_at: new Date().toISOString(),
-                synced: false
+                sync_status: 'draft'
             };
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(drafts));
+            localStorage.setItem(storageKey, JSON.stringify(drafts));
             return draftKey;
         },
         getDrafts: function () {
+            var storageKey = this.getStorageKey();
+            if (!storageKey) return {};
+
             try {
-                return JSON.parse(localStorage.getItem(this.STORAGE_KEY)) || {};
+                return JSON.parse(localStorage.getItem(storageKey)) || {};
             } catch (e) {
                 return {};
             }
         },
         clearDraft: function (draftKey) {
+            var storageKey = this.getStorageKey();
+            if (!storageKey) return;
+
             var drafts = this.getDrafts();
             delete drafts[draftKey];
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(drafts));
-        }
+            localStorage.setItem(storageKey, JSON.stringify(drafts));
+        },
+        purgeAll: purgeAllAttendanceDrafts
     };
+
+    // Run session isolation check immediately
+    enforceUserSessionIsolation();
 
     // Initialize on DOM load
     if (document.readyState === 'loading') {
