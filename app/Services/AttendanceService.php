@@ -87,11 +87,12 @@ class AttendanceService
         if ($user->user_type === 'teacher') {
             if ($sectionId) {
                 return Section::where('id', $sectionId)
+                    ->where('my_class_id', $classId)
                     ->where('teacher_id', $user->id)
                     ->exists();
             }
 
-            // If no specific section provided, check if teacher teaches any section in this class
+            // If no specific section provided, check if teacher is assigned to any section in this class
             return Section::where('my_class_id', $classId)
                 ->where('teacher_id', $user->id)
                 ->exists();
@@ -109,13 +110,19 @@ class AttendanceService
      */
     public function canUserViewStudentAttendance(User $user, $studentRecordId)
     {
-        if (in_array($user->user_type, ['super_admin', 'admin', 'teacher'])) {
+        if (in_array($user->user_type, ['super_admin', 'admin'])) {
             return true;
         }
 
         $sr = StudentRecord::find($studentRecordId);
         if (!$sr) {
             return false;
+        }
+
+        if ($user->user_type === 'teacher') {
+            return Section::where('id', $sr->section_id)
+                ->where('teacher_id', $user->id)
+                ->exists();
         }
 
         if ($user->user_type === 'student') {
@@ -145,10 +152,21 @@ class AttendanceService
         $session = $data['session'] ?? null;
         $academicYearId = $data['academic_year_id'] ?? null;
 
+        // Verify actor permission server-side
+        if (!$this->canUserManageAttendance($actor, $classId, $sectionId)) {
+            abort(403, __('Unauthorized: You are not authorized to manage attendance for this class or section.'));
+        }
+
         $dateInfo = $this->inspectAttendanceDate($bsDate);
         $adDate = $dateInfo['ad_date'];
 
         $studentsData = $data['students'] ?? [];
+        if (empty($studentsData)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'students' => [__('No student attendance records were submitted.')]
+            ]);
+        }
+
         $created = 0;
         $updated = 0;
 
@@ -157,16 +175,40 @@ class AttendanceService
             $adDate, $bsDate, $actor, $ipAddress, &$created, &$updated
         ) {
             foreach ($studentsData as $studentId => $row) {
-                $status = in_array($row['status'], ['present', 'absent', 'late', 'leave', 'half_day'])
-                    ? $row['status']
-                    : 'present';
+                // Reject invalid status with validation exception; never silently convert
+                if (!isset($row['status']) || !in_array($row['status'], ['present', 'absent', 'late', 'leave', 'half_day'], true)) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        "students.{$studentId}.status" => [__('Invalid attendance status provided. Allowed: present, absent, late, leave, half_day.')]
+                    ]);
+                }
+                $status = $row['status'];
                 $remarks = !empty($row['remarks']) ? trim($row['remarks']) : null;
+
+                $sr = StudentRecord::findOrFail($studentId);
+
+                // Verify student belongs to target class and section
+                if ((int)$sr->my_class_id !== (int)$classId) {
+                    abort(403, __('Unauthorized: Student does not belong to the selected class.'));
+                }
+
+                if ($sectionId && (int)$sr->section_id !== (int)$sectionId) {
+                    abort(403, __('Unauthorized: Student does not belong to the selected section.'));
+                }
+
+                // If teacher, verify teacher is assigned to this student's section
+                if ($actor->user_type === 'teacher') {
+                    $isAssigned = Section::where('id', $sr->section_id)
+                        ->where('teacher_id', $actor->id)
+                        ->exists();
+
+                    if (!$isAssigned) {
+                        abort(403, __('Unauthorized: You are not assigned to record attendance for this student.'));
+                    }
+                }
 
                 $existing = StudentAttendance::where('student_record_id', $studentId)
                     ->where('attendance_date', $adDate)
                     ->first();
-
-                $sr = StudentRecord::findOrFail($studentId);
 
                 if ($existing) {
                     $hasChanged = ($existing->status !== $status || $existing->remarks !== $remarks);
@@ -200,7 +242,7 @@ class AttendanceService
                         'student_record_id' => $studentId,
                         'user_id' => $sr->user_id,
                         'my_class_id' => $classId,
-                        'section_id' => $sectionId,
+                        'section_id' => $sr->section_id,
                         'academic_year_id' => $academicYearId,
                         'session' => $session,
                         'attendance_date' => $adDate,
@@ -263,9 +305,12 @@ class AttendanceService
             $adDate, $bsDate, $actor, $ipAddress, &$created, &$updated
         ) {
             foreach ($staffData as $userId => $row) {
-                $status = in_array($row['status'], ['present', 'absent', 'late', 'leave', 'half_day'])
-                    ? $row['status']
-                    : 'present';
+                if (!isset($row['status']) || !in_array($row['status'], ['present', 'absent', 'late', 'leave', 'half_day'], true)) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        "staff.{$userId}.status" => [__('Invalid attendance status provided. Allowed: present, absent, late, leave, half_day.')]
+                    ]);
+                }
+                $status = $row['status'];
                 $remarks = !empty($row['remarks']) ? trim($row['remarks']) : null;
 
                 $existing = StaffAttendance::where('user_id', $userId)
@@ -393,9 +438,10 @@ class AttendanceService
      * @param int|null $sectionId
      * @param int $yearBs
      * @param int $monthBs (1..12)
+     * @param array|null $allowedSectionIds
      * @return array
      */
-    public function getMonthlyClassAttendanceMatrix($classId, $sectionId, $yearBs, $monthBs)
+    public function getMonthlyClassAttendanceMatrix($classId, $sectionId, $yearBs, $monthBs, $allowedSectionIds = null)
     {
         // 1. Get days in this BS month
         $calendar = BikramSambatService::BS_CALENDAR_DATA;
@@ -436,6 +482,8 @@ class AttendanceService
         $query = StudentRecord::where('my_class_id', $classId);
         if ($sectionId) {
             $query->where('section_id', $sectionId);
+        } elseif (!empty($allowedSectionIds)) {
+            $query->whereIn('section_id', $allowedSectionIds);
         }
         $students = $query->with('user')->get();
 
@@ -443,6 +491,9 @@ class AttendanceService
         $attendances = StudentAttendance::where('my_class_id', $classId)
             ->when($sectionId, function ($q) use ($sectionId) {
                 return $q->where('section_id', $sectionId);
+            })
+            ->when(!$sectionId && !empty($allowedSectionIds), function ($q) use ($allowedSectionIds) {
+                return $q->whereIn('section_id', $allowedSectionIds);
             })
             ->whereIn('attendance_date', $adDates)
             ->get()

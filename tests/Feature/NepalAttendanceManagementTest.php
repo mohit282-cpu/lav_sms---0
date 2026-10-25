@@ -53,7 +53,7 @@ class NepalAttendanceManagementTest extends TestCase
         $admin = $this->getAdmin();
         $response = $this->actingAs($admin)->get(route('attendance.index'));
         $response->assertStatus(200);
-        $response->assertSee('Student Daily Attendance');
+        $response->assertSee(__('Student Daily Attendance'));
     }
 
     /**
@@ -153,7 +153,209 @@ class NepalAttendanceManagementTest extends TestCase
     }
 
     /**
-     * Test teacher permissions: unassigned teacher cannot record attendance for other class.
+     * Test assigned class teacher can view their assigned class and section attendance.
+     */
+    public function test_assigned_teacher_can_view_their_class_attendance()
+    {
+        $teacher = $this->getTeacher();
+        $class = MyClass::first();
+        $section = Section::where('my_class_id', $class->id)->first();
+
+        // Assign teacher to this section
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+        Section::where('id', $section->id)->update(['teacher_id' => $teacher->id]);
+
+        $response = $this->actingAs($teacher)->get(route('attendance.index', [
+            'my_class_id' => $class->id,
+            'section_id' => $section->id,
+            'attendance_date_bs' => '2083-07-08',
+        ]));
+
+        $response->assertStatus(200);
+        $response->assertViewHas('can_manage', true);
+        $response->assertViewHas('selected_class', $class->id);
+        $response->assertViewHas('selected_section', $section->id);
+    }
+
+    /**
+     * Test assigned class teacher auto-selection when they have exactly 1 assigned section.
+     */
+    public function test_assigned_teacher_auto_selected_when_single_assignment()
+    {
+        $teacher = $this->getTeacher();
+        $class = MyClass::first();
+        $section = Section::where('my_class_id', $class->id)->first();
+
+        // Assign to exactly one section
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+        Section::where('id', $section->id)->update(['teacher_id' => $teacher->id]);
+
+        $response = $this->actingAs($teacher)->get(route('attendance.index'));
+
+        $response->assertStatus(200);
+        $response->assertViewHas('has_assignment', true);
+        $response->assertViewHas('selected_class', $class->id);
+        $response->assertViewHas('selected_section', $section->id);
+    }
+
+    /**
+     * Test assigned class teacher can record attendance for assigned students.
+     */
+    public function test_assigned_teacher_can_record_attendance_for_assigned_students()
+    {
+        $teacher = $this->getTeacher();
+        $class = MyClass::first();
+        $section = Section::where('my_class_id', $class->id)->first();
+
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+        Section::where('id', $section->id)->update(['teacher_id' => $teacher->id]);
+
+        $student = StudentRecord::where('my_class_id', $class->id)
+            ->where('section_id', $section->id)
+            ->first();
+
+        $this->assertNotNull($student, 'Must have a student in this section.');
+
+        $postData = [
+            'my_class_id' => $class->id,
+            'section_id' => $section->id,
+            'attendance_date_bs' => '2083-07-08',
+            'students' => [
+                $student->id => ['status' => 'present', 'remarks' => 'Present on time'],
+            ],
+        ];
+
+        $response = $this->actingAs($teacher)->post(route('attendance.store'), $postData);
+        $response->assertSessionHas('flash_success');
+
+        $record = StudentAttendance::where('student_record_id', $student->id)
+            ->where('attendance_date_bs', '2083-07-08')
+            ->first();
+
+        $this->assertNotNull($record);
+        $this->assertEquals('present', $record->status);
+        $this->assertEquals($teacher->id, $record->recorded_by);
+    }
+
+    /**
+     * Test assigned class teacher can update attendance in their assigned class.
+     */
+    public function test_assigned_teacher_can_update_attendance_in_assigned_class()
+    {
+        $teacher = $this->getTeacher();
+        $class = MyClass::first();
+        $section = Section::where('my_class_id', $class->id)->first();
+
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+        Section::where('id', $section->id)->update(['teacher_id' => $teacher->id]);
+
+        $student = StudentRecord::where('my_class_id', $class->id)
+            ->where('section_id', $section->id)
+            ->first();
+
+        // 1. Initial entry: absent
+        $this->actingAs($teacher)->post(route('attendance.store'), [
+            'my_class_id' => $class->id,
+            'section_id' => $section->id,
+            'attendance_date_bs' => '2083-07-08',
+            'students' => [
+                $student->id => ['status' => 'absent', 'remarks' => 'Not in class'],
+            ],
+        ]);
+
+        $att = StudentAttendance::where('student_record_id', $student->id)
+            ->where('attendance_date_bs', '2083-07-08')
+            ->first();
+        $this->assertNotNull($att, 'Attendance record must exist after first post');
+        $this->assertEquals('absent', $att->status);
+
+        // 2. Teacher updates to late
+        $this->actingAs($teacher)->post(route('attendance.store'), [
+            'my_class_id' => $class->id,
+            'section_id' => $section->id,
+            'attendance_date_bs' => '2083-07-08',
+            'students' => [
+                $student->id => ['status' => 'late', 'remarks' => 'Arrived late after bell'],
+            ],
+        ]);
+
+        $att->refresh();
+        $this->assertEquals('late', $att->status);
+        $this->assertEquals('Arrived late after bell', $att->remarks);
+        $this->assertEquals($teacher->id, $att->updated_by);
+
+        // Audit trail check
+        $audit = AttendanceAuditTrail::where('attendance_id', $att->id)
+            ->where('action', 'update')
+            ->first();
+
+        $this->assertNotNull($audit);
+        $this->assertEquals('absent', $audit->old_status);
+        $this->assertEquals('late', $audit->new_status);
+        $this->assertEquals($teacher->id, $audit->modified_by);
+    }
+
+    /**
+     * Test teacher cannot access another class by changing request parameters.
+     */
+    public function test_teacher_cannot_access_another_class_by_changing_request_parameters()
+    {
+        $teacher = $this->getTeacher();
+        $class1 = MyClass::first();
+        $class2 = MyClass::where('id', '!=', $class1->id)->first();
+        $section1 = Section::where('my_class_id', $class1->id)->first();
+
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+        Section::where('id', $section1->id)->update(['teacher_id' => $teacher->id]);
+
+        // Attempt to access unassigned class in index
+        $resIndex = $this->actingAs($teacher)->get(route('attendance.index', [
+            'my_class_id' => $class2->id,
+        ]));
+        $resIndex->assertStatus(403);
+
+        // Attempt to access unassigned class in monthly
+        $resMonthly = $this->actingAs($teacher)->get(route('attendance.monthly', [
+            'my_class_id' => $class2->id,
+        ]));
+        $resMonthly->assertStatus(403);
+    }
+
+    /**
+     * Test teacher cannot submit a student ID from another class or section.
+     */
+    public function test_teacher_cannot_submit_student_id_from_another_class_or_section()
+    {
+        $teacher = $this->getTeacher();
+        $class1 = MyClass::first();
+        $class2 = MyClass::where('id', '!=', $class1->id)->first();
+        $section1 = Section::where('my_class_id', $class1->id)->first();
+
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+        Section::where('id', $section1->id)->update(['teacher_id' => $teacher->id]);
+
+        $foreignStudent = StudentRecord::where('my_class_id', $class2->id)->first();
+
+        // Attempt to submit foreign student under assigned class
+        $response = $this->actingAs($teacher)->post(route('attendance.store'), [
+            'my_class_id' => $class1->id,
+            'section_id' => $section1->id,
+            'attendance_date_bs' => '2083-07-08',
+            'students' => [
+                $foreignStudent->id => ['status' => 'present', 'remarks' => 'Intruder'],
+            ],
+        ]);
+
+        $response->assertStatus(403);
+
+        $exists = StudentAttendance::where('student_record_id', $foreignStudent->id)
+            ->where('attendance_date_bs', '2083-07-08')
+            ->exists();
+        $this->assertFalse($exists);
+    }
+
+    /**
+     * Test unassigned teacher is denied access.
      */
     public function test_unassigned_teacher_cannot_record_attendance()
     {
@@ -161,8 +363,8 @@ class NepalAttendanceManagementTest extends TestCase
         $class = MyClass::first();
         $student = StudentRecord::where('my_class_id', $class->id)->first();
 
-        // Ensure teacher is NOT assigned to this section
-        Section::where('my_class_id', $class->id)->update(['teacher_id' => null]);
+        // Ensure teacher has no section assignments
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
 
         $response = $this->actingAs($teacher)->post(route('attendance.store'), [
             'my_class_id' => $class->id,
@@ -174,6 +376,33 @@ class NepalAttendanceManagementTest extends TestCase
 
         // Must be rejected with 403 Forbidden
         $response->assertStatus(403);
+    }
+
+    /**
+     * Test unassigned teacher is denied access and views clear warning notice.
+     */
+    public function test_unassigned_teacher_is_denied_access()
+    {
+        $teacher = $this->getTeacher();
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+
+        // Accessing base page shows unassigned message
+        $response = $this->actingAs($teacher)->get(route('attendance.index'));
+        $response->assertStatus(200);
+        $response->assertViewHas('has_assignment', false);
+        $response->assertViewHas('can_manage', false);
+
+        // Attempting to bypass by passing class parameter gives 403 Forbidden
+        $resBypass = $this->actingAs($teacher)->get(route('attendance.index', ['my_class_id' => 1]));
+        $resBypass->assertStatus(403);
+
+        // Attempting to POST attendance gives 403 Forbidden
+        $resPost = $this->actingAs($teacher)->post(route('attendance.store'), [
+            'my_class_id' => 1,
+            'attendance_date_bs' => '2083-07-08',
+            'students' => [1 => ['status' => 'present']],
+        ]);
+        $resPost->assertStatus(403);
     }
 
     /**
@@ -194,6 +423,90 @@ class NepalAttendanceManagementTest extends TestCase
         // Student attempting to view other student's attendance -> 403 Forbidden
         $resOther = $this->actingAs($studentUser)->get(route('attendance.student_history', $otherRecord->id));
         $resOther->assertStatus(403);
+    }
+
+    /**
+     * Test parent can only view their own child's attendance history.
+     */
+    public function test_parent_can_only_view_own_child_attendance()
+    {
+        $parent = $this->getParent();
+        $childRecord = StudentRecord::first();
+        $childRecord->update(['my_parent_id' => $parent->id]);
+
+        $otherRecord = StudentRecord::where('id', '!=', $childRecord->id)->first();
+        $otherRecord->update(['my_parent_id' => null]);
+
+        // Parent viewing own child -> 200 OK
+        $resOwn = $this->actingAs($parent)->get(route('attendance.student_history', $childRecord->id));
+        $resOwn->assertStatus(200);
+
+        // Parent viewing other student -> 403 Forbidden
+        $resOther = $this->actingAs($parent)->get(route('attendance.student_history', $otherRecord->id));
+        $resOther->assertStatus(403);
+    }
+
+    /**
+     * Test students and parents cannot record attendance.
+     */
+    public function test_students_and_parents_cannot_record_attendance()
+    {
+        $student = $this->getStudent();
+        $parent = $this->getParent();
+        $class = MyClass::first();
+        $studentRec = StudentRecord::first();
+
+        $postData = [
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-08',
+            'students' => [
+                $studentRec->id => ['status' => 'present'],
+            ],
+        ];
+
+        // Student attempt
+        $resStudent = $this->actingAs($student)->post(route('attendance.store'), $postData);
+        $this->assertTrue(in_array($resStudent->status(), [302, 403]));
+
+        // Parent attempt
+        $resParent = $this->actingAs($parent)->post(route('attendance.store'), $postData);
+        $this->assertTrue(in_array($resParent->status(), [302, 403]));
+    }
+
+    /**
+     * Test invalid attendance status and invalid BS dates are rejected.
+     */
+    public function test_invalid_status_and_invalid_bs_dates_are_rejected()
+    {
+        $admin = $this->getAdmin();
+        $class = MyClass::first();
+        $student = StudentRecord::where('my_class_id', $class->id)->first();
+
+        // 1. Invalid status
+        $resInvalidStatus = $this->actingAs($admin)->post(route('attendance.store'), [
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-08',
+            'students' => [
+                $student->id => ['status' => 'sleeping', 'remarks' => ''],
+            ],
+        ]);
+        $resInvalidStatus->assertSessionHasErrors('students.' . $student->id . '.status');
+
+        // Confirm never silently converted to present
+        $att = StudentAttendance::where('student_record_id', $student->id)
+            ->where('attendance_date_bs', '2083-07-08')
+            ->first();
+        $this->assertNull($att);
+
+        // 2. Invalid BS date (day out of range for month)
+        $resInvalidDate = $this->actingAs($admin)->post(route('attendance.store'), [
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-35', // Kartik has 30 days
+            'students' => [
+                $student->id => ['status' => 'present', 'remarks' => ''],
+            ],
+        ]);
+        $resInvalidDate->assertSessionHasErrors('attendance_date_bs');
     }
 
     /**
@@ -313,6 +626,36 @@ class NepalAttendanceManagementTest extends TestCase
         ]));
 
         $response->assertStatus(200);
-        $response->assertSee('Attendance Overview by Class');
+        $response->assertSee(__('Attendance Overview by Class'));
+    }
+
+    /**
+     * Test AJAX sections endpoint scopes for teachers vs admins.
+     */
+    public function test_get_sections_ajax_scopes_for_teachers_and_admins()
+    {
+        $teacher = $this->getTeacher();
+        $admin = $this->getAdmin();
+        $class = MyClass::first();
+        $sections = Section::where('my_class_id', $class->id)->get();
+
+        if ($sections->count() > 1) {
+            $assignedSec = $sections->first();
+            Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+            Section::where('id', $assignedSec->id)->update(['teacher_id' => $teacher->id]);
+
+            // Teacher only gets assigned section
+            $resTeacher = $this->actingAs($teacher)->get(route('attendance.get_sections', $class->id));
+            $resTeacher->assertStatus(200);
+            $dataTeacher = $resTeacher->json();
+            $this->assertCount(1, $dataTeacher);
+            $this->assertEquals($assignedSec->id, $dataTeacher[0]['id']);
+
+            // Admin gets all sections
+            $resAdmin = $this->actingAs($admin)->get(route('attendance.get_sections', $class->id));
+            $resAdmin->assertStatus(200);
+            $dataAdmin = $resAdmin->json();
+            $this->assertCount($sections->count(), $dataAdmin);
+        }
     }
 }

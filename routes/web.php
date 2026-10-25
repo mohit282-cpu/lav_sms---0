@@ -164,6 +164,7 @@ Route::group(['middleware' => 'auth'], function () {
             Route::post('attendance', 'AttendanceController@store')->name('attendance.store');
             Route::get('attendance/monthly', 'AttendanceController@monthly')->name('attendance.monthly');
             Route::get('attendance/class-report', 'AttendanceController@classReport')->name('attendance.class_report');
+            Route::get('attendance/sections/{class_id}', 'AttendanceController@getSections')->name('attendance.get_sections');
         });
         Route::get('attendance/student/{student_id}', 'AttendanceController@studentHistory')->name('attendance.student_history');
 
