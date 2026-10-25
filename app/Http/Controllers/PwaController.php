@@ -66,11 +66,23 @@ class PwaController extends Controller
     public function subscribe(Request $request): JsonResponse
     {
         $request->validate([
-            'endpoint' => 'required|url',
-            'keys' => 'nullable|array',
-            'keys.p256dh' => 'nullable|string',
-            'keys.auth' => 'nullable|string',
+            'endpoint' => 'required|string|url|max:1000',
+            'keys' => 'required|array',
+            'keys.p256dh' => 'required|string|max:255',
+            'keys.auth' => 'required|string|max:255',
+            'content_encoding' => 'nullable|string|in:aesgcm,aes128gcm',
         ]);
+
+        $endpoint = $request->input('endpoint');
+        $host = parse_url($endpoint, PHP_URL_HOST);
+        $isLocalhost = in_array(strtolower($host ?: ''), ['localhost', '127.0.0.1']);
+
+        if (!str_starts_with(strtolower($endpoint), 'https://') && !$isLocalhost) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Subscription endpoint must use secure HTTPS protocol',
+            ], 422);
+        }
 
         $sub = PushSubscription::storeSubscription(Auth::id(), $request->all());
 
@@ -87,7 +99,7 @@ class PwaController extends Controller
     public function unsubscribe(Request $request): JsonResponse
     {
         $request->validate([
-            'endpoint' => 'required|url',
+            'endpoint' => 'required|string|url|max:1000',
         ]);
 
         $hash = hash('sha256', $request->endpoint);
@@ -98,6 +110,39 @@ class PwaController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Push subscription removed successfully',
+        ]);
+    }
+
+    /**
+     * Retrieve VAPID Public Key for client subscription handshake
+     */
+    public function vapidPublicKey(): JsonResponse
+    {
+        $publicKey = config('services.pwa.vapid_public_key') ?: env('VAPID_PUBLIC_KEY');
+
+        return response()->json([
+            'status' => 'success',
+            'vapid_public_key' => $publicKey,
+            'is_configured' => !empty($publicKey),
+        ]);
+    }
+
+    /**
+     * Send a safe test notification to the authenticated user
+     */
+    public function sendTestPush(Request $request): JsonResponse
+    {
+        $result = $this->pwaService->sendNotification(
+            Auth::id(),
+            'Test Notification',
+            'Web push notifications are configured and functioning correctly.',
+            route('dashboard')
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Test notification processed',
+            'result' => $result,
         ]);
     }
 }

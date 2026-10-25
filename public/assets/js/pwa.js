@@ -347,17 +347,41 @@
     /**
      * 5. Push Notifications Client Manager
      */
+    /**
+     * 5. Push Notifications Client Manager
+     */
     window.PwaPush = {
         isSupported: function () {
-            return ('serviceWorker' in navigator) && ('PushManager' in window);
+            return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+        },
+        getPermissionState: function () {
+            if (!('Notification' in window)) return 'unsupported';
+            return Notification.permission;
+        },
+        getSubscription: function () {
+            if (!this.isSupported()) return Promise.resolve(null);
+            return navigator.serviceWorker.ready.then(function (reg) {
+                return reg.pushManager.getSubscription();
+            });
         },
         subscribe: function (publicKey, subscribeUrl) {
             if (!this.isSupported()) {
                 return Promise.reject(new Error('Push notifications not supported on this browser.'));
             }
 
-            return navigator.serviceWorker.ready.then(function (reg) {
-                var convertedKey = urlBase64ToUint8Array(publicKey);
+            var key = publicKey || window.PWA_VAPID_PUBLIC_KEY;
+            if (!key) {
+                return Promise.reject(new Error('VAPID public key is not configured on the server.'));
+            }
+
+            return Notification.requestPermission().then(function (permission) {
+                if (permission !== 'granted') {
+                    throw new Error('Notification permission was ' + permission);
+                }
+
+                return navigator.serviceWorker.ready;
+            }).then(function (reg) {
+                var convertedKey = urlBase64ToUint8Array(key);
                 return reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: convertedKey
@@ -366,15 +390,32 @@
                 var csrf = document.querySelector('meta[name="csrf-token"]') ?
                     document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
 
-                return fetch(subscribeUrl || './pwa/push/subscribe', {
+                var subJson = subscription.toJSON();
+                var payload = {
+                    endpoint: subscription.endpoint,
+                    keys: {
+                        p256dh: subJson.keys ? subJson.keys.p256dh : '',
+                        auth: subJson.keys ? subJson.keys.auth : ''
+                    },
+                    content_encoding: 'aesgcm'
+                };
+
+                return fetch(subscribeUrl || window.PWA_PUSH_SUBSCRIBE_URL || './pwa/push/subscribe', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRF-TOKEN': csrf,
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify(subscription)
-                }).then(function (res) { return res.json(); });
+                    body: JSON.stringify(payload)
+                }).then(function (res) {
+                    if (!res.ok) {
+                        return res.json().then(function (err) {
+                            throw new Error(err.message || 'Server rejected push subscription');
+                        });
+                    }
+                    return res.json();
+                });
             });
         },
         unsubscribe: function (unsubscribeUrl) {
@@ -390,7 +431,7 @@
                     var csrf = document.querySelector('meta[name="csrf-token"]') ?
                         document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
 
-                    return fetch(unsubscribeUrl || './pwa/push/unsubscribe', {
+                    return fetch(unsubscribeUrl || window.PWA_PUSH_UNSUBSCRIBE_URL || './pwa/push/unsubscribe', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -401,11 +442,174 @@
                     });
                 });
             });
+        },
+        sendTestNotification: function () {
+            var csrf = document.querySelector('meta[name="csrf-token"]') ?
+                document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
+
+            return fetch(window.PWA_PUSH_TEST_URL || './pwa/push/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrf,
+                    'Accept': 'application/json'
+                }
+            }).then(function (res) {
+                return res.json();
+            });
+        }
+    };
+
+    /**
+     * UI Controller for Web Push settings in Account views
+     */
+    window.PwaPushUI = {
+        init: function () {
+            var card = document.getElementById('pwa-push-card');
+            if (!card) return;
+
+            this.updateCard();
+
+            var btnEnable = document.getElementById('pwa-btn-enable-push');
+            var btnDisable = document.getElementById('pwa-btn-disable-push');
+            var btnTest = document.getElementById('pwa-btn-test-push');
+
+            var self = this;
+            if (btnEnable) {
+                btnEnable.addEventListener('click', function () {
+                    btnEnable.disabled = true;
+                    btnEnable.innerHTML = '<i class="icon-spinner2 spinner mr-1"></i> Enabling...';
+                    window.PwaPush.subscribe().then(function () {
+                        self.updateCard();
+                        alert('Push notifications enabled successfully for this device!');
+                    }).catch(function (err) {
+                        btnEnable.disabled = false;
+                        btnEnable.innerHTML = '<i class="icon-bell mr-1"></i> Enable Notifications';
+                        self.updateCard();
+                        alert('Failed to enable push notifications: ' + err.message);
+                    });
+                });
+            }
+
+            if (btnDisable) {
+                btnDisable.addEventListener('click', function () {
+                    btnDisable.disabled = true;
+                    btnDisable.innerHTML = '<i class="icon-spinner2 spinner mr-1"></i> Disabling...';
+                    window.PwaPush.unsubscribe().then(function () {
+                        self.updateCard();
+                        alert('Push notifications disabled for this device.');
+                    }).catch(function (err) {
+                        btnDisable.disabled = false;
+                        btnDisable.innerHTML = '<i class="icon-bell-cross mr-1"></i> Disable Notifications';
+                        self.updateCard();
+                        alert('Failed to disable: ' + err.message);
+                    });
+                });
+            }
+
+            if (btnTest) {
+                btnTest.addEventListener('click', function () {
+                    btnTest.disabled = true;
+                    btnTest.innerHTML = '<i class="icon-spinner2 spinner mr-1"></i> Sending...';
+                    window.PwaPush.sendTestNotification().then(function (res) {
+                        btnTest.disabled = false;
+                        btnTest.innerHTML = '<i class="icon-paperplane mr-1"></i> Send Test Notification';
+                        if (res && res.status === 'success') {
+                            alert('Test notification sent! Check your device notifications.');
+                        } else {
+                            alert('Test notification: ' + (res.message || 'Failed'));
+                        }
+                    }).catch(function (err) {
+                        btnTest.disabled = false;
+                        btnTest.innerHTML = '<i class="icon-paperplane mr-1"></i> Send Test Notification';
+                        alert('Error sending test notification: ' + err.message);
+                    });
+                });
+            }
+        },
+
+        updateCard: function () {
+            var badgePermission = document.getElementById('pwa-push-permission-badge');
+            var badgeStatus = document.getElementById('pwa-push-status-badge');
+            var btnEnable = document.getElementById('pwa-btn-enable-push');
+            var btnDisable = document.getElementById('pwa-btn-disable-push');
+            var btnTest = document.getElementById('pwa-btn-test-push');
+            var msgEl = document.getElementById('pwa-push-msg');
+
+            if (!window.PwaPush.isSupported()) {
+                if (badgePermission) {
+                    badgePermission.className = 'badge badge-secondary';
+                    badgePermission.textContent = 'Unsupported';
+                }
+                if (badgeStatus) {
+                    badgeStatus.className = 'badge badge-secondary';
+                    badgeStatus.textContent = 'Not Available';
+                }
+                if (btnEnable) btnEnable.style.display = 'none';
+                if (btnDisable) btnDisable.style.display = 'none';
+                if (btnTest) btnTest.style.display = 'none';
+                if (msgEl) msgEl.textContent = 'Web Push notifications are not supported by this browser.';
+                return;
+            }
+
+            var perm = window.PwaPush.getPermissionState();
+            if (badgePermission) {
+                if (perm === 'granted') {
+                    badgePermission.className = 'badge badge-success';
+                    badgePermission.textContent = 'Granted';
+                } else if (perm === 'denied') {
+                    badgePermission.className = 'badge badge-danger';
+                    badgePermission.textContent = 'Blocked / Denied';
+                } else {
+                    badgePermission.className = 'badge badge-warning';
+                    badgePermission.textContent = 'Prompt Required';
+                }
+            }
+
+            window.PwaPush.getSubscription().then(function (sub) {
+                if (sub) {
+                    if (badgeStatus) {
+                        badgeStatus.className = 'badge badge-success';
+                        badgeStatus.textContent = 'Subscribed (Active)';
+                    }
+                    if (btnEnable) btnEnable.style.display = 'none';
+                    if (btnDisable) {
+                        btnDisable.style.display = 'inline-block';
+                        btnDisable.disabled = false;
+                        btnDisable.innerHTML = '<i class="icon-bell-cross mr-1"></i> Disable Notifications';
+                    }
+                    if (btnTest) {
+                        btnTest.style.display = 'inline-block';
+                        btnTest.disabled = false;
+                        btnTest.innerHTML = '<i class="icon-paperplane mr-1"></i> Send Test Notification';
+                    }
+                    if (msgEl) msgEl.textContent = 'This browser is registered to receive school updates and alerts.';
+                } else {
+                    if (badgeStatus) {
+                        badgeStatus.className = 'badge badge-secondary';
+                        badgeStatus.textContent = 'Not Subscribed';
+                    }
+                    if (btnEnable) {
+                        btnEnable.style.display = 'inline-block';
+                        btnEnable.disabled = false;
+                        btnEnable.innerHTML = '<i class="icon-bell mr-1"></i> Enable Notifications';
+                    }
+                    if (btnDisable) btnDisable.style.display = 'none';
+                    if (btnTest) btnTest.style.display = 'none';
+                    if (msgEl) {
+                        if (perm === 'denied') {
+                            msgEl.textContent = 'Notifications are blocked in your browser settings. Please allow notifications in site permissions to receive alerts.';
+                        } else {
+                            msgEl.textContent = 'Click "Enable Notifications" to receive school alerts on this device.';
+                        }
+                    }
+                }
+            });
         }
     };
 
     function urlBase64ToUint8Array(base64String) {
-        var padding = '='.repeat((4 - base64String.length % 4) % 4);
+        var padding = '===='.slice(0, (4 - base64String.length % 4) % 4);
         var base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
         var rawData = window.atob(base64);
         var outputArray = new Uint8Array(rawData.length);
@@ -1036,9 +1240,11 @@
         document.addEventListener('DOMContentLoaded', function () {
             registerServiceWorker();
             window.PwaAttendanceUI.init();
+            window.PwaPushUI.init();
         });
     } else {
         registerServiceWorker();
         window.PwaAttendanceUI.init();
+        window.PwaPushUI.init();
     }
 })();

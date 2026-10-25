@@ -1,0 +1,185 @@
+<?php
+
+namespace App\Console\Commands;
+
+use Base64Url\Base64Url;
+use Illuminate\Console\Command;
+use Jose\Component\KeyManagement\JWKFactory;
+use Minishlink\WebPush\Utils;
+use Minishlink\WebPush\VAPID;
+
+class GenerateVapidKeys extends Command
+{
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'pwa:vapid
+                            {--show : Display the currently configured VAPID public key and subject}
+                            {--save : Automatically update the .env file with generated keys}';
+
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
+    protected $description = 'Generate and configure VAPID keys for PWA Web Push notifications';
+
+    /**
+     * Execute the console command.
+     *
+     * @return int
+     */
+    public function handle()
+    {
+        $this->ensureOpenSslConfig();
+
+        if ($this->option('show')) {
+            $publicKey = config('services.pwa.vapid_public_key');
+            $privateKey = config('services.pwa.vapid_private_key');
+            $subject = config('services.pwa.vapid_subject');
+
+            $this->info('=== Current PWA VAPID Configuration ===');
+            $this->line('VAPID Public Key:  ' . ($publicKey ?: '<Not Configured>'));
+            $this->line('VAPID Private Key: ' . ($privateKey ? substr($privateKey, 0, 4) . '...' . substr($privateKey, -4) : '<Not Configured>'));
+            $this->line('VAPID Subject:     ' . ($subject ?: '<Not Configured>'));
+
+            return 0;
+        }
+
+        try {
+            $keys = $this->createKeys();
+        } catch (\Exception $e) {
+            $this->error('Failed to generate VAPID keys: ' . $e->getMessage());
+            return 1;
+        }
+
+        $publicKey = $keys['publicKey'];
+        $privateKey = $keys['privateKey'];
+        $defaultSubject = 'mailto:' . (config('mail.from.address') ?: 'admin@' . (parse_url(config('app.url'), PHP_URL_HOST) ?: 'localhost'));
+
+        $this->info('=== Generated Web Push VAPID Keypair ===');
+        $this->line('<comment>VAPID_PUBLIC_KEY=</comment>' . $publicKey);
+        $this->line('<comment>VAPID_PRIVATE_KEY=</comment>' . $privateKey);
+        $this->line('<comment>VAPID_SUBJECT=</comment>' . $defaultSubject);
+        $this->newLine();
+
+        if ($this->option('save')) {
+            $envPath = base_path('.env');
+            if (!file_exists($envPath)) {
+                $this->warn('.env file not found. Please create it and add the keys manually.');
+                return 0;
+            }
+
+            $envContent = file_get_contents($envPath);
+
+            $envContent = $this->setEnvValue($envContent, 'VAPID_PUBLIC_KEY', $publicKey);
+            $envContent = $this->setEnvValue($envContent, 'VAPID_PRIVATE_KEY', $privateKey);
+
+            if (strpos($envContent, 'VAPID_SUBJECT=') === false) {
+                $envContent .= "\nVAPID_SUBJECT=" . $defaultSubject . "\n";
+            }
+
+            file_put_contents($envPath, $envContent);
+            $this->info('✓ VAPID keys saved to .env file successfully.');
+        } else {
+            $this->comment('To save these keys to your .env file, run: php artisan pwa:vapid --save');
+        }
+
+        return 0;
+    }
+
+    /**
+     * Ensure Windows OpenSSL configuration is present
+     */
+    protected function ensureOpenSslConfig(): void
+    {
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' && empty(getenv('OPENSSL_CONF'))) {
+            $candidates = [
+                'Z:/Xampp/php/extras/ssl/openssl.cnf',
+                'C:/xampp/php/extras/ssl/openssl.cnf',
+                'Z:/Xampp/apache/bin/openssl.cnf',
+                'C:/xampp/apache/bin/openssl.cnf',
+            ];
+
+            foreach ($candidates as $cnf) {
+                if (file_exists($cnf)) {
+                    putenv("OPENSSL_CONF={$cnf}");
+                    $_ENV['OPENSSL_CONF'] = $cnf;
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Update or append an environment key in env string
+     */
+    protected function setEnvValue(string $envContent, string $key, string $value): string
+    {
+        $pattern = "/^{$key}=.*/m";
+
+        if (preg_match($pattern, $envContent)) {
+            return preg_replace($pattern, "{$key}={$value}", $envContent);
+        }
+
+        return rtrim($envContent) . "\n{$key}={$value}\n";
+    }
+
+    /**
+     * Create VAPID keypair with cross-platform fallback
+     */
+    protected function createKeys(): array
+    {
+        try {
+            return VAPID::createVapidKeys();
+        } catch (\Throwable $e) {
+            // Fallback for Windows environments where OpenSSL configuration must be specified explicitly
+            $cnf = getenv('OPENSSL_CONF');
+            if (!$cnf || !file_exists($cnf)) {
+                $candidates = [
+                    'Z:/Xampp/php/extras/ssl/openssl.cnf',
+                    'C:/xampp/php/extras/ssl/openssl.cnf',
+                ];
+                foreach ($candidates as $candidate) {
+                    if (file_exists($candidate)) {
+                        $cnf = $candidate;
+                        break;
+                    }
+                }
+            }
+
+            $options = [
+                'curve_name' => 'prime256v1',
+                'private_key_type' => OPENSSL_KEYTYPE_EC,
+            ];
+            if ($cnf && file_exists($cnf)) {
+                $options['config'] = $cnf;
+            }
+
+            $res = openssl_pkey_new($options);
+            if ($res === false) {
+                throw new \RuntimeException('Unable to create OpenSSL EC key: ' . openssl_error_string());
+            }
+
+            $exportSuccess = openssl_pkey_export($res, $pem, null, $options);
+            if (!$exportSuccess || empty($pem)) {
+                throw new \RuntimeException('Unable to export OpenSSL EC key: ' . openssl_error_string());
+            }
+
+            $jwk = JWKFactory::createFromKey($pem, null, [
+                'kty' => 'EC',
+                'crv' => 'P-256',
+            ]);
+
+            $binaryPublicKey = hex2bin(Utils::serializePublicKeyFromJWK($jwk));
+            $binaryPrivateKey = hex2bin(str_pad(bin2hex(Base64Url::decode($jwk->get('d'))), 2 * 32, '0', STR_PAD_LEFT));
+
+            return [
+                'publicKey' => Base64Url::encode($binaryPublicKey),
+                'privateKey' => Base64Url::encode($binaryPrivateKey),
+            ];
+        }
+    }
+}

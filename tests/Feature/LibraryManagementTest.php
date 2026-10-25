@@ -506,9 +506,10 @@ class LibraryManagementTest extends TestCase
     {
         $librarian = $this->getLibrarian();
 
+        $uniqueSuffix = uniqid();
         $category = BookCategory::create([
-            'name' => 'Protected Category ' . rand(100, 999),
-            'slug' => 'protected-category-' . rand(100, 999),
+            'name' => 'Protected Category ' . $uniqueSuffix,
+            'slug' => 'protected-category-' . $uniqueSuffix,
         ]);
 
         Book::create([

@@ -14,6 +14,7 @@
                 @if(Qs::userIsPTA())
                     <li class="nav-item"><a href="#edit-profile" class="nav-link" data-toggle="tab"><i class="icon-plus2"></i> {{ __('My Profile') }}</a></li>
                 @endif
+                <li class="nav-item"><a href="#pwa-notifications" class="nav-link" data-toggle="tab"><i class="icon-bell2 mr-1"></i> {{ __('Notifications') }}</a></li>
             </ul>
 
             <div class="tab-content">
@@ -136,6 +137,42 @@
                         </div>
                     </div>
                 @endif
+
+                <div class="tab-pane fade" id="pwa-notifications">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="card border-left-3 border-left-primary shadow-sm" id="pwa-push-card">
+                                <div class="card-header header-elements-inline">
+                                    <h6 class="card-title font-weight-semibold">{{ __('PWA Web Push Notifications') }}</h6>
+                                    <div>
+                                        <span class="badge badge-secondary mr-1" id="pwa-push-permission-badge">{{ __('Checking...') }}</span>
+                                        <span class="badge badge-secondary" id="pwa-push-status-badge">{{ __('Checking...') }}</span>
+                                    </div>
+                                </div>
+                                <div class="card-body">
+                                    <p id="pwa-push-msg" class="text-muted">
+                                        {{ __('Web push notifications allow you to receive timely school notices, calendar announcements, and library updates on this device.') }}
+                                    </p>
+                                    <div class="alert alert-info border-0 p-2 font-size-sm">
+                                        <i class="icon-info22 mr-1"></i>
+                                        {{ __('Notifications are device-specific. Enabling alerts here registers only this current browser/device.') }}
+                                    </div>
+                                    <div class="mt-3">
+                                        <button type="button" class="btn btn-primary" id="pwa-btn-enable-push">
+                                            <i class="icon-bell mr-1"></i> {{ __('Enable Notifications') }}
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" id="pwa-btn-disable-push" style="display: none;">
+                                            <i class="icon-bell-cross mr-1"></i> {{ __('Disable Notifications') }}
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary ml-2" id="pwa-btn-test-push" style="display: none;">
+                                            <i class="icon-paperplane mr-1"></i> {{ __('Send Test Notification') }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

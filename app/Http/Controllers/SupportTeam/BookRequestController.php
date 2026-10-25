@@ -88,7 +88,18 @@ class BookRequestController extends Controller
         $params = $req->route() ? $req->route()->parameters() : [];
         $targetId = $id ?: ($params['id'] ?? null) ?: $req->get('id');
         try {
+            $bookRequest = BookRequest::find((int) $targetId);
             $this->libraryService->approveRequest((int) $targetId, $req->get('notes'));
+
+            if ($bookRequest && $bookRequest->user_id) {
+                \App\Jobs\SendWebPushNotification::dispatch(
+                    $bookRequest->user_id,
+                    __('Library Update'),
+                    __('Your book request has been approved.'),
+                    route('book_requests.my_requests')
+                );
+            }
+
             return back()->with('flash_success', __('Book request approved.'));
         } catch (\Throwable $e) {
             return back()->with('flash_danger', $e->getMessage());
@@ -103,7 +114,18 @@ class BookRequestController extends Controller
         $params = $req->route() ? $req->route()->parameters() : [];
         $targetId = $id ?: ($params['id'] ?? null) ?: $req->get('id');
         try {
+            $bookRequest = BookRequest::find((int) $targetId);
             $this->libraryService->rejectRequest((int) $targetId, $req->get('notes'));
+
+            if ($bookRequest && $bookRequest->user_id) {
+                \App\Jobs\SendWebPushNotification::dispatch(
+                    $bookRequest->user_id,
+                    __('Library Update'),
+                    __('Your book request status has been updated.'),
+                    route('book_requests.my_requests')
+                );
+            }
+
             return back()->with('flash_success', __('Book request rejected.'));
         } catch (\Throwable $e) {
             return back()->with('flash_danger', $e->getMessage());

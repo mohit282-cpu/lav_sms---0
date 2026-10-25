@@ -19,9 +19,25 @@ class PushSubscription extends Model
         'content_encoding',
     ];
 
+    /**
+     * The attributes that should be hidden for serialization to prevent secret exposure.
+     */
+    protected $hidden = [
+        'auth_token',
+        'public_key',
+    ];
+
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Find subscription by raw endpoint URL
+     */
+    public static function findByEndpoint(string $endpoint): ?self
+    {
+        return self::where('endpoint_hash', hash('sha256', $endpoint))->first();
     }
 
     /**

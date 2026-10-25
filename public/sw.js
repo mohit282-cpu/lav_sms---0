@@ -291,7 +291,7 @@ self.addEventListener('message', (event) => {
 });
 
 /**
- * 5. Push Notification Event
+ * 5. Push Notification Event (Privacy-Safe & Sanitized)
  */
 self.addEventListener('push', (event) => {
     let data = {
@@ -304,9 +304,17 @@ self.addEventListener('push', (event) => {
 
     if (event.data) {
         try {
-            data = Object.assign(data, event.data.json());
+            const parsed = event.data.json();
+            if (parsed && typeof parsed === 'object') {
+                if (parsed.title) data.title = String(parsed.title).replace(/<[^>]*>?/gm, '');
+                if (parsed.body) data.body = String(parsed.body).replace(/<[^>]*>?/gm, '');
+                if (parsed.url) data.url = parsed.url;
+            }
         } catch (e) {
-            data.body = event.data.text();
+            const text = event.data.text();
+            if (text) {
+                data.body = String(text).replace(/<[^>]*>?/gm, '');
+            }
         }
     }
 
@@ -316,6 +324,8 @@ self.addEventListener('push', (event) => {
         badge: data.badge,
         data: { url: data.url },
         vibrate: [100, 50, 100],
+        tag: 'sms-notice',
+        renotify: true,
         actions: [
             { action: 'open_url', title: 'Open Portal' }
         ]
@@ -327,20 +337,34 @@ self.addEventListener('push', (event) => {
 });
 
 /**
- * 6. Notification Click Event
+ * 6. Notification Click Event (Strict Same-Origin Target Check)
  */
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
-    const targetUrl = event.notification.data && event.notification.data.url
-        ? event.notification.data.url
-        : './dashboard';
+    let targetUrl = './dashboard';
+    if (event.notification.data && event.notification.data.url) {
+        try {
+            const parsed = new URL(event.notification.data.url, self.location.origin);
+            if (parsed.origin === self.location.origin) {
+                targetUrl = parsed.pathname + parsed.search;
+            }
+        } catch (e) {
+            targetUrl = './dashboard';
+        }
+    }
 
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
             for (const client of clientList) {
-                if (client.url.includes(targetUrl) && 'focus' in client) {
-                    return client.focus();
+                try {
+                    const clientUrl = new URL(client.url);
+                    const targetParsed = new URL(targetUrl, self.location.origin);
+                    if (clientUrl.pathname === targetParsed.pathname && 'focus' in client) {
+                        return client.focus();
+                    }
+                } catch (e) {
+                    // Ignore URL parsing errors for unmatched clients
                 }
             }
             if (clients.openWindow) {

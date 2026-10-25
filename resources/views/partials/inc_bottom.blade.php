@@ -57,6 +57,10 @@
     window.PWA_I18N_INSTALL_BTN = "{{ __('Install App') }}";
     window.PWA_I18N_ONLINE = "{{ __('Connection Restored') }}";
     window.PWA_I18N_OFFLINE = "{{ __('Offline Mode - Live actions require connection') }}";
+    window.PWA_VAPID_PUBLIC_KEY = "{{ config('services.pwa.vapid_public_key') ?: env('VAPID_PUBLIC_KEY') }}";
+    window.PWA_PUSH_SUBSCRIBE_URL = "{{ route('pwa.push.subscribe') }}";
+    window.PWA_PUSH_UNSUBSCRIBE_URL = "{{ route('pwa.push.unsubscribe') }}";
+    window.PWA_PUSH_TEST_URL = "{{ route('pwa.push.test') }}";
 </script>
 <script src="{{ asset('assets/js/pwa.js') }}"></script>
 
