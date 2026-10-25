@@ -238,4 +238,77 @@ class NepalExamAndMarksWorkflowTest extends TestCase
         $this->assertEquals(0.0, (float)$mark->gpa_point);
         $this->assertFalse((bool)$mark->is_passed);
     }
+
+    /**
+     * Test manage marks selector resolves active students even if session in student_records differs from exam/current session.
+     */
+    public function test_admin_manage_marks_selector_resolves_active_students_when_session_differs()
+    {
+        $admin = $this->getAdmin();
+        $exam = Exam::first();
+        $myClass = MyClass::first();
+        $section = Section::where('my_class_id', $myClass->id)->first();
+        $subject = Subject::where('my_class_id', $myClass->id)->first();
+
+        $response = $this->actingAs($admin)->post(route('marks.selector'), [
+            'exam_id' => $exam->id,
+            'my_class_id' => $myClass->id,
+            'section_id' => $section->id,
+            'subject_id' => $subject->id,
+        ]);
+
+        $response->assertRedirect(route('marks.manage', [$exam->id, $myClass->id, $section->id, $subject->id]));
+        $response->assertSessionMissing('pop_error');
+    }
+
+    /**
+     * Test student marksheet year selector resolves correctly with hashed student ID.
+     */
+    public function test_student_marksheet_year_selector_resolves_with_hashed_id()
+    {
+        $student = $this->getStudent();
+        $exam = Exam::first();
+        $myClass = MyClass::first();
+        $section = Section::where('my_class_id', $myClass->id)->first();
+
+        // Ensure student has at least one exam record so select_year loads
+        \App\Models\ExamRecord::firstOrCreate([
+            'exam_id' => $exam->id,
+            'student_id' => $student->id,
+            'my_class_id' => $myClass->id,
+            'section_id' => $section->id,
+            'year' => $exam->year,
+        ]);
+
+        $hashedId = \App\Helpers\Qs::hash($student->id);
+        $response = $this->actingAs($student)->get(route('marks.year_selector', $hashedId));
+
+        $response->assertStatus(200);
+        $response->assertViewIs('pages.support_team.marks.select_year');
+    }
+
+    /**
+     * Test student with no exam records receives friendly notice instead of false student record not found.
+     */
+    public function test_student_without_exam_records_shows_informative_message()
+    {
+        $students = User::where('user_type', 'student')->get();
+        $studentWithoutExam = null;
+        foreach ($students as $st) {
+            if (\App\Models\ExamRecord::where('student_id', $st->id)->count() === 0) {
+                $studentWithoutExam = $st;
+                break;
+            }
+        }
+
+        if (!$studentWithoutExam) {
+            $this->markTestSkipped('All students have exam records in this environment.');
+        }
+
+        $hashedId = \App\Helpers\Qs::hash($studentWithoutExam->id);
+        $response = $this->actingAs($studentWithoutExam)->get(route('marks.year_selector', $hashedId));
+
+        $response->assertRedirect(route('dashboard'));
+        $response->assertSessionHas('flash_danger', __('No exam records or marksheet found for this student.'));
+    }
 }

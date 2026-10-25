@@ -32,7 +32,11 @@ class MarkController extends Controller
 
     public function index()
     {
-        $d['exams'] = $this->exam->getExam(['year' => $this->year]);
+        $exams = $this->exam->getExam(['year' => $this->year]);
+        if($exams->isEmpty()){
+            $exams = $this->exam->all();
+        }
+        $d['exams'] = $exams;
         $d['my_classes'] = $this->my_class->all();
         $d['sections'] = $this->my_class->getAllSections();
         $d['subjects'] = $this->my_class->getAllSubjects();
@@ -48,34 +52,36 @@ class MarkController extends Controller
 
     public function year_selected(Request $req, $student_id)
     {
-        if(!$this->verifyStudentExamYear($student_id, $req->year)){
+        $st_id = $this->decodeStudentId($student_id);
+        if(!$this->verifyStudentExamYear($st_id, $req->year)){
             return $this->noStudentRecord();
         }
 
-        $student_id = Qs::hash($student_id);
-        return redirect()->route('marks.show', [$student_id, $req->year]);
+        return redirect()->route('marks.show', [Qs::hash($st_id), $req->year]);
     }
 
     public function show($student_id, $year)
     {
+        $st_id = $this->decodeStudentId($student_id);
+
         /* Prevent Other Students/Parents from viewing Result of others */
-        if(Auth::user()->id != $student_id && !Qs::userIsTeamSAT() && !Qs::userIsMyChild($student_id, Auth::user()->id)){
+        if(Auth::user()->id != $st_id && !Qs::userIsTeamSAT() && !Qs::userIsMyChild($st_id, Auth::user()->id)){
             return redirect(route('dashboard'))->with('pop_error', __('msg.denied'));
         }
 
         if(Mk::examIsLocked() && !Qs::userIsTeamSA()){
-            Session::put('marks_url', route('marks.show', [Qs::hash($student_id), $year]));
+            Session::put('marks_url', route('marks.show', [Qs::hash($st_id), $year]));
 
-            if(!$this->checkPinVerified($student_id)){
-                return redirect()->route('pins.enter', Qs::hash($student_id));
+            if(!$this->checkPinVerified($st_id)){
+                return redirect()->route('pins.enter', Qs::hash($st_id));
             }
         }
 
-        if(!$this->verifyStudentExamYear($student_id, $year)){
+        if(!$this->verifyStudentExamYear($st_id, $year)){
             return $this->noStudentRecord();
         }
 
-        $wh = ['student_id' => $student_id, 'year' => $year ];
+        $wh = ['student_id' => $st_id, 'year' => $year ];
 
         /* Prevent students/parents from viewing unpublished results */
         if (!Qs::userIsTeamSAT()) {
@@ -91,12 +97,15 @@ class MarkController extends Controller
             $d['exam_records'] = $exr = $this->exam->getRecord($wh);
             $d['exams'] = $this->exam->getExam(['year' => $year]);
         }
-        $d['sr'] = $this->student->getRecord(['user_id' => $student_id])->first();
+        $d['sr'] = $this->student->getRecord(['user_id' => $st_id])->first();
+        if ($exr->isEmpty() || !$exr->first()) {
+            return $this->noStudentRecord();
+        }
         $d['my_class'] = $mc = $this->my_class->getMC(['id' => $exr->first()->my_class_id])->first();
         $d['class_type'] = $this->my_class->findTypeByClass($mc->id);
         $d['subjects'] = $this->my_class->findSubjectByClass($mc->id);
         $d['year'] = $year;
-        $d['student_id'] = $student_id;
+        $d['student_id'] = $st_id;
         $d['skills'] = $this->exam->getSkillByClassType() ?: NULL;
         //$d['ct'] = $d['class_type']->code;
         //$d['mark_type'] = Qs::getMarkType($d['ct']);
@@ -106,26 +115,31 @@ class MarkController extends Controller
 
     public function print_view($student_id, $exam_id, $year)
     {
+        $st_id = $this->decodeStudentId($student_id);
+
         /* Prevent Other Students/Parents from viewing Result of others */
-        if(Auth::user()->id != $student_id && !Qs::userIsTeamSA() && !Qs::userIsMyChild($student_id, Auth::user()->id)){
+        if(Auth::user()->id != $st_id && !Qs::userIsTeamSA() && !Qs::userIsMyChild($st_id, Auth::user()->id)){
             return redirect(route('dashboard'))->with('pop_error', __('msg.denied'));
         }
 
         if(Mk::examIsLocked() && !Qs::userIsTeamSA()){
-            Session::put('marks_url', route('marks.show', [Qs::hash($student_id), $year]));
+            Session::put('marks_url', route('marks.show', [Qs::hash($st_id), $year]));
 
-            if(!$this->checkPinVerified($student_id)){
-                return redirect()->route('pins.enter', Qs::hash($student_id));
+            if(!$this->checkPinVerified($st_id)){
+                return redirect()->route('pins.enter', Qs::hash($st_id));
             }
         }
 
-        if(!$this->verifyStudentExamYear($student_id, $year)){
+        if(!$this->verifyStudentExamYear($st_id, $year)){
             return $this->noStudentRecord();
         }
 
-        $wh = ['student_id' => $student_id, 'exam_id' => $exam_id, 'year' => $year ];
+        $wh = ['student_id' => $st_id, 'exam_id' => $exam_id, 'year' => $year ];
         $d['marks'] = $mks = $this->exam->getMark($wh);
         $d['exr'] = $exr = $this->exam->getRecord($wh)->first();
+        if (!$exr) {
+            return $this->noStudentRecord();
+        }
         $d['my_class'] = $mc = $this->my_class->find($exr->my_class_id);
         $d['section_id'] = $exr->section_id;
         $d['ex'] = $exam = $this->exam->find($exam_id);
@@ -139,13 +153,13 @@ class MarkController extends Controller
         }
 
         $d['tex'] = 'tex'.$exam->term;
-        $d['sr'] = $sr =$this->student->getRecord(['user_id' => $student_id])->first();
+        $d['sr'] = $sr = $this->student->getRecord(['user_id' => $st_id])->first();
         $d['class_type'] = $this->my_class->findTypeByClass($mc->id);
         $d['subjects'] = $this->my_class->findSubjectByClass($mc->id);
 
         $d['ct'] = $ct = $d['class_type']->code;
         $d['year'] = $year;
-        $d['student_id'] = $student_id;
+        $d['student_id'] = $st_id;
         $d['exam_id'] = $exam_id;
 
         $d['skills'] = $this->exam->getSkillByClassType() ?: NULL;
@@ -163,9 +177,18 @@ class MarkController extends Controller
         $data = $req->only(['exam_id', 'my_class_id', 'section_id', 'subject_id']);
         $d2 = $req->only(['exam_id', 'my_class_id', 'section_id']);
         $d = $req->only(['my_class_id', 'section_id']);
-        $d['session'] = $data['year'] = $d2['year'] = $this->year;
 
-        $students = $this->student->getRecord($d)->get();
+        $exam = $this->exam->find($req->exam_id);
+        $examYear = $exam ? $exam->year : $this->year;
+        $data['year'] = $d2['year'] = $examYear;
+
+        // Try getting students for the exam session/year first
+        $students = $this->student->getRecord(array_merge($d, ['session' => $examYear]))->get();
+        // If no students explicitly registered under this session string, fall back to active students in class and section
+        if($students->count() < 1){
+            $students = $this->student->getRecord($d)->get();
+        }
+
         if($students->count() < 1){
             return back()->with('pop_error', __('msg.rnf'));
         }
@@ -181,7 +204,9 @@ class MarkController extends Controller
 
     public function manage($exam_id, $class_id, $section_id, $subject_id)
     {
-        $d = ['exam_id' => $exam_id, 'my_class_id' => $class_id, 'section_id' => $section_id, 'subject_id' => $subject_id, 'year' => $this->year];
+        $exam = $this->exam->find($exam_id);
+        $examYear = $exam ? $exam->year : $this->year;
+        $d = ['exam_id' => $exam_id, 'my_class_id' => $class_id, 'section_id' => $section_id, 'subject_id' => $subject_id, 'year' => $examYear];
 
         $d['marks'] = $this->exam->getMark($d);
         if($d['marks']->count() < 1){
@@ -198,7 +223,6 @@ class MarkController extends Controller
         }
         $d['selected'] = true;
         $d['class_type'] = $this->my_class->findTypeByClass($class_id);
-
         return view('pages.support_team.marks.manage', $d);
     }
 
@@ -346,7 +370,11 @@ class MarkController extends Controller
 
     public function batch_fix()
     {
-        $d['exams'] = $this->exam->getExam(['year' => $this->year]);
+        $exams = $this->exam->getExam(['year' => $this->year]);
+        if($exams->isEmpty()){
+            $exams = $this->exam->all();
+        }
+        $d['exams'] = $exams;
         $d['my_classes'] = $this->my_class->all();
         $d['sections'] = $this->my_class->getAllSections();
         $d['selected'] = false;
@@ -360,9 +388,10 @@ class MarkController extends Controller
         $class_id = $req->my_class_id;
         $section_id = $req->section_id;
 
-        $w = ['exam_id' => $exam_id, 'my_class_id' => $class_id, 'section_id' => $section_id, 'year' => $this->year];
-
         $exam = $this->exam->find($exam_id);
+        $examYear = $exam ? $exam->year : $this->year;
+        $w = ['exam_id' => $exam_id, 'my_class_id' => $class_id, 'section_id' => $section_id, 'year' => $examYear];
+
         $exrs = $this->exam->getRecord($w);
         $marks = $this->exam->getMark($w);
 
@@ -392,10 +421,10 @@ class MarkController extends Controller
 
             $st_id = $exr->student_id;
 
-            $d3['total'] = $this->mark->getExamTotalTerm($exam, $st_id, $class_id, $this->year);
-            $d3['ave'] = $this->mark->getExamAvgTerm($exam, $st_id, $class_id, $section_id, $this->year);
-            $d3['class_ave'] = $this->mark->getClassAvg($exam, $class_id, $this->year);
-            $d3['pos'] = $this->mark->getPos($st_id, $exam, $class_id, $section_id, $this->year);
+            $d3['total'] = $this->mark->getExamTotalTerm($exam, $st_id, $class_id, $examYear);
+            $d3['ave'] = $this->mark->getExamAvgTerm($exam, $st_id, $class_id, $section_id, $examYear);
+            $d3['class_ave'] = $this->mark->getClassAvg($exam, $class_id, $examYear);
+            $d3['pos'] = $this->mark->getPos($st_id, $exam, $class_id, $section_id, $examYear);
 
             $this->exam->updateRecord(['id' => $exr->id], $d3);
         }
@@ -452,12 +481,18 @@ class MarkController extends Controller
     public function tabulation($exam_id = NULL, $class_id = NULL, $section_id = NULL)
     {
         $d['my_classes'] = $this->my_class->all();
-        $d['exams'] = $this->exam->getExam(['year' => $this->year]);
+        $exams = $this->exam->getExam(['year' => $this->year]);
+        if($exams->isEmpty()){
+            $exams = $this->exam->all();
+        }
+        $d['exams'] = $exams;
         $d['selected'] = FALSE;
 
         if($class_id && $exam_id && $section_id){
+            $exam = $this->exam->find($exam_id);
+            $examYear = $exam ? $exam->year : $this->year;
 
-            $wh = ['my_class_id' => $class_id, 'section_id' => $section_id, 'exam_id' => $exam_id, 'year' => $this->year];
+            $wh = ['my_class_id' => $class_id, 'section_id' => $section_id, 'exam_id' => $exam_id, 'year' => $examYear];
 
             $sub_ids = $this->mark->getSubjectIDs($wh);
             $st_ids = $this->mark->getStudentIDs($wh);
@@ -474,13 +509,13 @@ class MarkController extends Controller
             $d['my_class_id'] = $class_id;
             $d['section_id'] = $section_id;
             $d['exam_id'] = $exam_id;
-            $d['year'] = $this->year;
+            $d['year'] = $examYear;
             $d['marks'] = $mks = $this->exam->getMark($wh);
             $d['exr'] = $exr = $this->exam->getRecord($wh);
 
             $d['my_class'] = $mc = $this->my_class->find($class_id);
             $d['section']  = $this->my_class->findSection($section_id);
-            $d['ex'] = $exam = $this->exam->find($exam_id);
+            $d['ex'] = $exam;
             $d['tex'] = 'tex'.$exam->term;
             //$d['class_type'] = $this->my_class->findTypeByClass($mc->id);
             //$d['ct'] = $ct = $d['class_type']->code;
@@ -491,7 +526,10 @@ class MarkController extends Controller
 
     public function print_tabulation($exam_id, $class_id, $section_id)
     {
-        $wh = ['my_class_id' => $class_id, 'section_id' => $section_id, 'exam_id' => $exam_id, 'year' => $this->year];
+        $exam = $this->exam->find($exam_id);
+        $examYear = $exam ? $exam->year : $this->year;
+
+        $wh = ['my_class_id' => $class_id, 'section_id' => $section_id, 'exam_id' => $exam_id, 'year' => $examYear];
 
         $sub_ids = $this->mark->getSubjectIDs($wh);
         $st_ids = $this->mark->getStudentIDs($wh);
@@ -505,14 +543,13 @@ class MarkController extends Controller
 
         $d['my_class_id'] = $class_id;
         $d['exam_id'] = $exam_id;
-        $d['year'] = $this->year;
-        $wh = ['exam_id' => $exam_id, 'my_class_id' => $class_id];
+        $d['year'] = $examYear;
         $d['marks'] = $mks = $this->exam->getMark($wh);
         $d['exr'] = $exr = $this->exam->getRecord($wh);
 
         $d['my_class'] = $mc = $this->my_class->find($class_id);
         $d['section']  = $this->my_class->findSection($section_id);
-        $d['ex'] = $exam = $this->exam->find($exam_id);
+        $d['ex'] = $exam;
         $d['tex'] = 'tex'.$exam->term;
         $d['s'] = Setting::all()->flatMap(function($s){
             return [$s->type => $s->description];
@@ -528,23 +565,34 @@ class MarkController extends Controller
         return redirect()->route('marks.tabulation', [$req->exam_id, $req->my_class_id, $req->section_id]);
     }
 
+    protected function decodeStudentId($student_id)
+    {
+        $raw = Qs::decodeHash($student_id);
+        return $raw ? (int)$raw : (int)$student_id;
+    }
+
     protected function verifyStudentExamYear($student_id, $year = null)
     {
-        $years = $this->exam->getExamYears($student_id);
-        $student_exists = $this->student->exists($student_id);
+        $st_id = $this->decodeStudentId($student_id);
+        $student_exists = $this->student->exists($st_id);
 
-        if(!$year){
-            if($student_exists && $years->count() > 0)
-            {
-                $d =['years' => $years, 'student_id' => Qs::hash($student_id)];
+        if (!$student_exists) {
+            return $year ? false : $this->noStudentRecord();
+        }
+
+        $years = $this->exam->getExamYears($st_id);
+
+        if (!$year) {
+            if ($years->count() > 0) {
+                $d = ['years' => $years, 'student_id' => Qs::hash($st_id)];
 
                 return view('pages.support_team.marks.select_year', $d);
             }
 
-            return $this->noStudentRecord();
+            return redirect()->route('dashboard')->with('flash_danger', __('No exam records or marksheet found for this student.'));
         }
 
-        return ($student_exists && $years->contains('year', $year)) ? true  : false;
+        return $years->contains('year', $year);
     }
 
     protected function noStudentRecord()

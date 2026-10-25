@@ -206,5 +206,6 @@
     "Mark All Absent": "सबै अनुपस्थित जनाउनुहोस्",
     "Filter / Load Students": "विद्यार्थीहरू लोड गर्नुहोस्",
     "View Sheet": "विवरण हेर्नुहोस्",
-    "Generate Report": "प्रतिवेदन तयार गर्नुहोस्"
+    "Generate Report": "प्रतिवेदन तयार गर्नुहोस्",
+    "No exam records or marksheet found for this student.": "यस विद्यार्थीको कुनै परीक्षा रेकर्ड वा मार्कसिट फेला परेन।"
 }
