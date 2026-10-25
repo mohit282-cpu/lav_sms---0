@@ -170,8 +170,20 @@ class AttendanceService
         $created = 0;
         $updated = 0;
 
+        $studentIds = array_keys($studentsData);
+        $studentRecords = StudentRecord::whereIn('id', $studentIds)->get()->keyBy('id');
+        $existingAttendances = StudentAttendance::whereIn('student_record_id', $studentIds)
+            ->where('attendance_date', $adDate)
+            ->get()
+            ->keyBy('student_record_id');
+
+        $teacherAssignedSectionIds = ($actor->user_type === 'teacher')
+            ? Section::where('teacher_id', $actor->id)->pluck('id')->map(fn($id) => (int)$id)->all()
+            : [];
+
         DB::transaction(function () use (
-            $studentsData, $classId, $sectionId, $academicYearId, $session,
+            $studentsData, $studentRecords, $existingAttendances, $teacherAssignedSectionIds,
+            $classId, $sectionId, $academicYearId, $session,
             $adDate, $bsDate, $actor, $ipAddress, &$created, &$updated
         ) {
             foreach ($studentsData as $studentId => $row) {
@@ -184,7 +196,10 @@ class AttendanceService
                 $status = $row['status'];
                 $remarks = !empty($row['remarks']) ? trim($row['remarks']) : null;
 
-                $sr = StudentRecord::findOrFail($studentId);
+                $sr = $studentRecords->get($studentId);
+                if (!$sr) {
+                    abort(404, __('Student record not found.'));
+                }
 
                 // Verify student belongs to target class and section
                 if ((int)$sr->my_class_id !== (int)$classId) {
@@ -197,18 +212,12 @@ class AttendanceService
 
                 // If teacher, verify teacher is assigned to this student's section
                 if ($actor->user_type === 'teacher') {
-                    $isAssigned = Section::where('id', $sr->section_id)
-                        ->where('teacher_id', $actor->id)
-                        ->exists();
-
-                    if (!$isAssigned) {
+                    if (!in_array((int)$sr->section_id, $teacherAssignedSectionIds, true)) {
                         abort(403, __('Unauthorized: You are not assigned to record attendance for this student.'));
                     }
                 }
 
-                $existing = StudentAttendance::where('student_record_id', $studentId)
-                    ->where('attendance_date', $adDate)
-                    ->first();
+                $existing = $existingAttendances->get($studentId);
 
                 if ($existing) {
                     $hasChanged = ($existing->status !== $status || $existing->remarks !== $remarks);
@@ -300,8 +309,14 @@ class AttendanceService
         $created = 0;
         $updated = 0;
 
+        $userIds = array_keys($staffData);
+        $existingStaffAttendances = StaffAttendance::whereIn('user_id', $userIds)
+            ->where('attendance_date', $adDate)
+            ->get()
+            ->keyBy('user_id');
+
         DB::transaction(function () use (
-            $staffData, $academicYearId, $session,
+            $staffData, $existingStaffAttendances, $academicYearId, $session,
             $adDate, $bsDate, $actor, $ipAddress, &$created, &$updated
         ) {
             foreach ($staffData as $userId => $row) {
@@ -313,9 +328,7 @@ class AttendanceService
                 $status = $row['status'];
                 $remarks = !empty($row['remarks']) ? trim($row['remarks']) : null;
 
-                $existing = StaffAttendance::where('user_id', $userId)
-                    ->where('attendance_date', $adDate)
-                    ->first();
+                $existing = $existingStaffAttendances->get($userId);
 
                 if ($existing) {
                     $hasChanged = ($existing->status !== $status || $existing->remarks !== $remarks);
