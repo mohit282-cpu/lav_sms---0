@@ -86,7 +86,7 @@ Route::group(['middleware' => 'auth'], function () {
         Route::group(['prefix' => 'payments'], function(){
 
             Route::get('manage/{class_id?}', 'PaymentController@manage')->name('payments.manage');
-            Route::get('invoice/{id}/{year?}', 'PaymentController@invoice')->name('payments.invoice');
+            Route::get('invoice/{id}/{year?}', 'PaymentController@invoice')->name('payments.invoice')->where('year', '.*');
             Route::get('receipts/{id}', 'PaymentController@receipts')->name('payments.receipts');
             Route::get('pdf_receipts/{id}', 'PaymentController@pdf_receipts')->name('payments.pdf_receipts');
             Route::post('select_year', 'PaymentController@select_year')->name('payments.select_year');
@@ -131,8 +131,8 @@ Route::group(['middleware' => 'auth'], function () {
 
             Route::get('select_year/{id}', 'MarkController@year_selector')->name('marks.year_selector');
             Route::post('select_year/{id}', 'MarkController@year_selected')->name('marks.year_select');
-            Route::get('show/{id}/{year}', 'MarkController@show')->name('marks.show');
-            Route::get('print/{id}/{exam_id}/{year}', 'MarkController@print_view')->name('marks.print');
+            Route::get('show/{id}/{year}', 'MarkController@show')->name('marks.show')->where('year', '.*');
+            Route::get('print/{id}/{exam_id}/{year}', 'MarkController@print_view')->name('marks.print')->where('year', '.*');
 
         });
 
@@ -146,7 +146,8 @@ Route::group(['middleware' => 'auth'], function () {
         Route::put('exams/{exam}/publish', 'ExamController@publish')->name('exams.publish');
         Route::put('exams/{exam}/unpublish', 'ExamController@unpublish')->name('exams.unpublish');
         Route::resource('dorms', 'DormController');
-        Route::resource('payments', 'PaymentController');
+        Route::resource('payments', 'PaymentController', ['except' => ['show']]);
+        Route::get('payments/{year}', 'PaymentController@show')->name('payments.show')->where('year', '.*');
 
         /*************** Academic Years & Holidays (Nepal BS) *****************/
         Route::resource('academic_years', 'AcademicYearController');

@@ -40,19 +40,13 @@ class PaymentController extends Controller
 
     public function show($year)
     {
-        $d['payments'] = $p = $this->pay->getPayment(['year' => $year])->get();
-
-        if(($p->count() < 1)){
-            return Qs::goWithDanger('payments.index');
-        }
-
+        $d['payments'] = $this->pay->getPayment(['year' => $year])->get();
         $d['selected'] = true;
         $d['my_classes'] = $this->my_class->all();
         $d['years'] = $this->pay->getPaymentYears();
         $d['year'] = $year;
 
         return view('pages.support_team.payments.index', $d);
-
     }
 
     public function select_year(Request $req)

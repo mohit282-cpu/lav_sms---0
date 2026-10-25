@@ -32,7 +32,22 @@ class PaymentRepo
 
     public function getPaymentYears()
     {
-        return Payment::select('year')->distinct()->get();
+        $years = Payment::select('year')->distinct()->pluck('year')->toArray();
+
+        try {
+            $ay = \App\Models\AcademicYear::pluck('name')->toArray();
+            $years = array_unique(array_filter(array_merge($years, $ay)));
+        } catch (\Exception $e) {
+            // fallback
+        }
+
+        if (empty($years)) {
+            $years = [Qs::getCurrentSession()];
+        }
+
+        return collect($years)->map(function($y) {
+            return (object) ['year' => $y];
+        });
     }
 
     public function find($id)
