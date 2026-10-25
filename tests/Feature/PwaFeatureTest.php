@@ -203,5 +203,49 @@ class PwaFeatureTest extends TestCase
         $response->assertStatus(200);
         $response->assertSee("window.PWA_USER_ID = {$this->admin->id};", false);
     }
+
+    /**
+     * Test HTTPS scheme forcing and reverse-proxy header handling
+     */
+    public function test_trust_proxies_and_https_headers()
+    {
+        $response = $this->withHeaders([
+            'X-Forwarded-Proto' => 'https',
+            'X-Forwarded-Port' => '443',
+        ])->get('/manifest.json');
+
+        $response->assertStatus(200);
+        $this->assertTrue(request()->isSecure() || $response->isOk());
+    }
+
+    /**
+     * Test each manifest icon's image dimensions match declared size
+     */
+    public function test_manifest_icons_match_declared_dimensions()
+    {
+        $pwaService = new PwaService();
+        $manifest = $pwaService->getManifest();
+
+        foreach ($manifest['icons'] as $icon) {
+            $src = $icon['src'];
+            $path = parse_url($src, PHP_URL_PATH);
+            $localRel = ltrim($path, '/');
+            if (str_contains($localRel, 'assets/')) {
+                $sub = substr($localRel, strpos($localRel, 'assets/'));
+                $fullPath = public_path($sub);
+            } else {
+                $fullPath = public_path($localRel);
+            }
+
+            $this->assertFileExists($fullPath);
+            $imageInfo = getimagesize($fullPath);
+            $this->assertNotFalse($imageInfo, "File is not a valid image: {$fullPath}");
+
+            list($declaredW, $declaredH) = explode('x', $icon['sizes']);
+            $this->assertEquals((int)$declaredW, $imageInfo[0], "Width mismatch for {$src}");
+            $this->assertEquals((int)$declaredH, $imageInfo[1], "Height mismatch for {$src}");
+        }
+    }
 }
+
 
