@@ -289,6 +289,32 @@ class AttendanceService
     }
 
     /**
+     * Check if attendance records for a class & section on a given date were modified after a given client timestamp.
+     *
+     * @param int $classId
+     * @param string $adDate
+     * @param array $studentIds
+     * @param \Carbon\Carbon $clientTime
+     * @return StudentAttendance|null Returns conflicting server record if conflict exists
+     */
+    public function checkAttendanceConflict($classId, $adDate, array $studentIds, Carbon $clientTime)
+    {
+        $latest = StudentAttendance::where('my_class_id', $classId)
+            ->where('attendance_date', $adDate)
+            ->whereIn('student_record_id', $studentIds)
+            ->with('updater')
+            ->latest('updated_at')
+            ->first();
+
+        // If the server record was updated more than 2 seconds after the draft was created, flag conflict
+        if ($latest && $latest->updated_at && $latest->updated_at->gt($clientTime->copy()->addSeconds(2))) {
+            return $latest;
+        }
+
+        return null;
+    }
+
+    /**
      * Save or update staff attendance with audit trail and duplicate protection.
      *
      * @param array $data

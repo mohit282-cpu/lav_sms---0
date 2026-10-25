@@ -8,6 +8,42 @@
             {{ __('You are not currently assigned as a class teacher to any class or section. Student attendance cannot be accessed or recorded until an administrator assigns you to a section.') }}
         </div>
     @else
+        {{-- Offline Attendance Synchronization Widget --}}
+        <div id="pwa-attendance-offline-widget" class="card border-left-3 border-left-warning mb-3" style="display: none;">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center py-2">
+                <h6 class="font-weight-bold mb-0 text-warning-800">
+                    <i class="icon-cloud-check mr-2"></i> {{ __('Offline Attendance Batches') }}
+                    <span id="pwa-pending-count-badge" class="badge badge-warning ml-2">0</span>
+                </h6>
+                <div>
+                    <button type="button" class="btn btn-sm btn-primary" id="pwa-btn-sync-all" onclick="PwaAttendanceUI.syncAll()">
+                        <i class="icon-sync mr-1"></i> {{ __('Sync All to Server') }}
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="p-2 bg-light border-bottom font-size-xs text-muted">
+                    <i class="icon-info22 mr-1"></i> {{ __('Notice: Offline attendance batches are stored locally and are NOT yet confirmed by the server. Connect to the internet and click "Sync" to finalize.') }}
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped mb-0">
+                        <thead>
+                            <tr class="table-active">
+                                <th>{{ __('Date (BS)') }}</th>
+                                <th>{{ __('Class & Section') }}</th>
+                                <th>{{ __('Records') }}</th>
+                                <th>{{ __('Sync Status') }}</th>
+                                <th class="text-right">{{ __('Actions') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pwa-drafts-tbody">
+                            {{-- Dynamically populated by PwaAttendanceUI --}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-header header-elements-inline">
                 <h6 class="card-title font-weight-bold">{{ __('Student Daily Attendance (Bikram Sambat)') }}</h6>
@@ -103,7 +139,7 @@
 
                 <div class="card-body">
                     @if(count($students) > 0)
-                        <form method="post" action="{{ route('attendance.store') }}">
+                        <form method="post" action="{{ route('attendance.store') }}" id="attendance-entry-form">
                             @csrf
                             <input type="hidden" name="my_class_id" value="{{ $selected_class }}">
                             <input type="hidden" name="section_id" value="{{ $selected_section }}">
@@ -223,6 +259,76 @@
                     }
                     $.each(resp, function(i, s) {
                         sectionSelect.append($('<option>', { value: s.id, text: s.name }));
+                    });
+                }
+            });
+        }
+
+        // Offline Attendance Interception
+        var attForm = document.getElementById('attendance-entry-form');
+        if (attForm) {
+            attForm.addEventListener('submit', function (e) {
+                if (!navigator.onLine) {
+                    e.preventDefault();
+
+                    var form = this;
+                    var classId = form.querySelector('input[name="my_class_id"]').value;
+                    var sectionInput = form.querySelector('input[name="section_id"]');
+                    var sectionId = sectionInput ? sectionInput.value : null;
+                    var dateBs = form.querySelector('input[name="attendance_date_bs"]').value;
+
+                    var studentsData = {};
+                    var checkedRadios = form.querySelectorAll('.att-status:checked');
+                    checkedRadios.forEach(function (radio) {
+                        var match = radio.name.match(/students\[(\d+)\]\[status\]/);
+                        if (match) {
+                            var stId = match[1];
+                            var remarksInput = form.querySelector('input[name="students[' + stId + '][remarks]"]');
+                            studentsData[stId] = {
+                                status: radio.value,
+                                remarks: remarksInput ? remarksInput.value : ''
+                            };
+                        }
+                    });
+
+                    if (Object.keys(studentsData).length === 0) {
+                        alert('{{ __("Please select attendance status for at least one student.") }}');
+                        return;
+                    }
+
+                    if (!window.PwaAttendance) {
+                        alert('{{ __("PWA offline storage module is not loaded.") }}');
+                        return;
+                    }
+
+                    window.PwaAttendance.saveDraft({
+                        my_class_id: classId,
+                        class_name: '{{ $selected_class ? ($my_classes->where("id", $selected_class)->first()->name ?? "") : "" }}',
+                        section_id: sectionId,
+                        section_name: '{{ $selected_section ? ($sections->where("id", $selected_section)->first()->name ?? "") : "" }}',
+                        attendance_date_bs: dateBs,
+                        students: studentsData
+                    }, function (err, saved) {
+                        if (err) {
+                            alert('{{ __("Failed to save offline draft: ") }}' + err.message);
+                            return;
+                        }
+
+                        if (window.swal) {
+                            swal({
+                                title: '{{ __("Offline Draft Stored Locally!") }}',
+                                text: '{{ __("Attendance has NOT yet been confirmed by the server. Please reconnect to the internet and click \"Sync All to Server\" to commit it to the school database.") }}',
+                                type: 'warning',
+                                confirmButtonClass: 'btn btn-primary',
+                                confirmButtonText: '{{ __("Acknowledge") }}'
+                            });
+                        } else {
+                            alert('{{ __("Offline Draft Stored Locally! Attendance is NOT yet saved to the server. Please click Sync when back online.") }}');
+                        }
+
+                        if (window.PwaAttendanceUI) {
+                            window.PwaAttendanceUI.refreshWidget();
+                        }
                     });
                 }
             });

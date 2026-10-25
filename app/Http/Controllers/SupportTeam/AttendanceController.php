@@ -12,8 +12,11 @@ use App\Models\StudentRecord;
 use App\Repositories\MyClassRepo;
 use App\Services\AttendanceService;
 use App\Services\BikramSambatService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class AttendanceController extends Controller
 {
@@ -161,6 +164,11 @@ class AttendanceController extends Controller
      */
     public function store(Request $request)
     {
+        // If client requests JSON or submits an offline sync payload with idempotency key, handle via sync()
+        if ($request->expectsJson() || $request->ajax() || $request->filled('idempotency_key')) {
+            return $this->sync($request);
+        }
+
         $request->validate([
             'my_class_id' => 'required|exists:my_classes,id',
             'section_id' => 'nullable|exists:sections,id',
@@ -171,8 +179,8 @@ class AttendanceController extends Controller
         ]);
 
         $user = Auth::user();
-        $classId = $request->my_class_id;
-        $sectionId = $request->section_id;
+        $classId = (int)$request->my_class_id;
+        $sectionId = $request->filled('section_id') ? (int)$request->section_id : null;
 
         // Validate BS date using BikramSambatService
         try {
@@ -225,6 +233,154 @@ class AttendanceController extends Controller
             throw $e;
         } catch (\Exception $e) {
             return back()->with('flash_danger', __('Failed to record attendance: ') . $e->getMessage());
+        }
+    }
+
+    /**
+     * Synchronize offline attendance draft batch with idempotency and conflict detection.
+     */
+    public function sync(Request $request)
+    {
+        $request->validate([
+            'idempotency_key' => 'required|string|max:64',
+            'my_class_id' => 'required|exists:my_classes,id',
+            'section_id' => 'nullable|exists:sections,id',
+            'attendance_date_bs' => 'required|string',
+            'students' => 'required|array|min:1',
+            'students.*.status' => 'required|in:present,absent,late,leave,half_day',
+            'students.*.remarks' => 'nullable|string|max:255',
+            'created_at_client' => 'nullable|string',
+            'force_overwrite' => 'nullable|boolean',
+        ]);
+
+        $idempotencyKey = $request->idempotency_key;
+        $cacheKey = 'att_sync_' . md5($idempotencyKey);
+
+        // 1. Idempotency replay check (handles network timeout after DB commit)
+        if ($cached = Cache::get($cacheKey)) {
+            return response()->json([
+                'status' => 'success',
+                'synced' => true,
+                'idempotent_replay' => true,
+                'idempotency_key' => $idempotencyKey,
+                'message' => __('Attendance batch already confirmed by server.'),
+                'data' => $cached,
+            ], 200);
+        }
+
+        $user = Auth::user();
+        $classId = (int)$request->my_class_id;
+        $sectionId = $request->filled('section_id') ? (int)$request->section_id : null;
+
+        // 2. Validate BS date
+        try {
+            $dateInfo = $this->attendanceService->inspectAttendanceDate($request->attendance_date_bs);
+            $adDate = $dateInfo['ad_date'];
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'synced' => false,
+                'message' => __('The attendance date is invalid: ') . $e->getMessage(),
+            ], 422);
+        }
+
+        // 3. Authorize teacher / staff assignment server-side
+        if (!$this->attendanceService->canUserManageAttendance($user, $classId, $sectionId)) {
+            return response()->json([
+                'status' => 'error',
+                'synced' => false,
+                'message' => __('Unauthorized: You are not assigned to record attendance for this class or section.'),
+            ], 403);
+        }
+
+        // Auto-resolve section for teacher if single section in class
+        if ($user->user_type === 'teacher' && !$sectionId) {
+            $teacherSections = Section::where('teacher_id', $user->id)->where('my_class_id', $classId)->get();
+            if ($teacherSections->count() === 1) {
+                $sectionId = $teacherSections->first()->id;
+            }
+        }
+
+        // 4. Conflict detection: Check if records were modified on server after client created the draft
+        if (!$request->boolean('force_overwrite') && $request->filled('created_at_client')) {
+            try {
+                $clientTime = Carbon::parse($request->created_at_client);
+                $studentIds = array_keys($request->students);
+                $conflict = $this->attendanceService->checkAttendanceConflict($classId, $adDate, $studentIds, $clientTime);
+
+                if ($conflict) {
+                    return response()->json([
+                        'status' => 'conflict',
+                        'synced' => false,
+                        'idempotency_key' => $idempotencyKey,
+                        'server_updated_at' => $conflict->updated_at ? $conflict->updated_at->toIso8601String() : null,
+                        'server_updater' => ($conflict->updater) ? $conflict->updater->name : __('Another staff member'),
+                        'message' => __('Conflict: Attendance for this class was modified on the server after your offline draft was created. Please review and decide whether to overwrite or discard.'),
+                    ], 409);
+                }
+            } catch (\Exception $e) {
+                // If client date parsing fails, log and proceed with standard save
+                Log::warning('Client date parse exception in attendance sync: ' . $e->getMessage());
+            }
+        }
+
+        // 5. Atomic record execution
+        try {
+            $currentSession = Qs::getCurrentSession();
+            $activeYear = AcademicYear::active()->first();
+
+            $result = $this->attendanceService->recordStudentAttendance([
+                'my_class_id' => $classId,
+                'section_id' => $sectionId,
+                'attendance_date_bs' => $request->attendance_date_bs,
+                'session' => $currentSession,
+                'academic_year_id' => $activeYear ? $activeYear->id : null,
+                'students' => $request->students,
+            ], $user, $request->ip());
+
+            $responseData = [
+                'created' => $result['created'],
+                'updated' => $result['updated'],
+                'total' => count($request->students),
+                'class_id' => $classId,
+                'section_id' => $sectionId,
+                'attendance_date_bs' => $request->attendance_date_bs,
+                'synced_at' => now()->toIso8601String(),
+            ];
+
+            // Cache confirmation for 7 days to ensure idempotent retries
+            Cache::put($cacheKey, $responseData, now()->addDays(7));
+
+            return response()->json([
+                'status' => 'success',
+                'synced' => true,
+                'idempotency_key' => $idempotencyKey,
+                'message' => __('Attendance synchronized successfully. (:created new, :updated updated).', [
+                    'created' => $result['created'],
+                    'updated' => $result['updated'],
+                ]),
+                'data' => $responseData,
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'synced' => false,
+                'message' => __('Validation failed.'),
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            return response()->json([
+                'status' => 'error',
+                'synced' => false,
+                'message' => $e->getMessage() ?: __('Access denied.')
+            ], $e->getStatusCode());
+        } catch (\Exception $e) {
+            Log::error('Attendance sync error: ' . $e->getMessage(), ['exception' => $e]);
+            return response()->json([
+                'status' => 'error',
+                'synced' => false,
+                'message' => __('Failed to synchronize attendance due to a server error. Please try again.')
+            ], 500);
         }
     }
 

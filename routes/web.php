@@ -171,6 +171,7 @@ Route::group(['middleware' => ['auth', 'no_store']], function () {
         Route::group(['middleware' => 'teamSAT'], function(){
             Route::get('attendance', 'AttendanceController@index')->name('attendance.index');
             Route::post('attendance', 'AttendanceController@store')->name('attendance.store');
+            Route::post('attendance/sync', 'AttendanceController@sync')->name('attendance.sync');
             Route::get('attendance/monthly', 'AttendanceController@monthly')->name('attendance.monthly');
             Route::get('attendance/class-report', 'AttendanceController@classReport')->name('attendance.class_report');
             Route::get('attendance/sections/{class_id}', 'AttendanceController@getSections')->name('attendance.get_sections');

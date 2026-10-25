@@ -389,6 +389,71 @@ class PwaFeatureTest extends TestCase
         $this->assertStringContainsString('isSafeToUpdate()', $content);
         $this->assertStringContainsString('window.location.reload()', $content);
     }
+
+    /**
+     * Test attendance sync endpoint applies strict no-store cache headers
+     */
+    public function test_attendance_sync_endpoint_has_strict_no_store_headers()
+    {
+        $this->actingAs($this->admin);
+
+        $response = $this->postJson(route('attendance.sync'), [
+            'idempotency_key' => 'header-check-' . uniqid(),
+            'my_class_id' => 999999, // Intentional invalid to trigger error
+            'attendance_date_bs' => '2083-07-09',
+            'students' => [1 => ['status' => 'present']],
+        ]);
+
+        $cacheControl = $response->headers->get('Cache-Control');
+        $this->assertNotNull($cacheControl);
+        $this->assertStringContainsString('no-store', $cacheControl);
+        $this->assertStringContainsString('no-cache', $cacheControl);
+        $this->assertEquals('no-cache', $response->headers->get('Pragma'));
+    }
+
+    /**
+     * Test PWA client implements offline attendance contract, IndexedDB storage, and UUID idempotency
+     */
+    public function test_pwa_client_implements_offline_attendance_contract_and_indexeddb_storage()
+    {
+        $pwaJsPath = public_path('assets/js/pwa.js');
+        $content = file_get_contents($pwaJsPath);
+
+        // Verify UUID generator
+        $this->assertStringContainsString('generateUUID', $content);
+
+        // Verify validated attendance statuses
+        $this->assertStringContainsString("'present', 'absent', 'late', 'leave', 'half_day'", $content);
+
+        // Verify IndexedDB store definition with fallback
+        $this->assertStringContainsString('PwaAttendanceStore', $content);
+        $this->assertStringContainsString('lav_sms_pwa_db', $content);
+        $this->assertStringContainsString('attendance_drafts', $content);
+        $this->assertStringContainsString('client_uuid', $content);
+
+        // Verify sync methods
+        $this->assertStringContainsString('syncDraft:', $content);
+        $this->assertStringContainsString('syncAllPending:', $content);
+        $this->assertStringContainsString('PwaAttendanceUI', $content);
+
+        // Verify conflict handling
+        $this->assertStringContainsString('resolveConflict', $content);
+        $this->assertStringContainsString('force_overwrite', $content);
+    }
+
+    /**
+     * Test attendance index view contains offline sync widget and form interceptor
+     */
+    public function test_attendance_index_view_contains_offline_sync_widget_and_interceptor()
+    {
+        $this->actingAs($this->admin);
+
+        $response = $this->get(route('attendance.index'));
+        $response->assertStatus(200);
+
+        $response->assertSee('pwa-attendance-offline-widget');
+        $response->assertSee('pwa-btn-sync-all');
+        $response->assertSee('pwa-drafts-tbody');
+        $response->assertSee('PwaAttendance.saveDraft');
+    }
 }
-
-

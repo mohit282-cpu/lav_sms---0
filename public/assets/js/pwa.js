@@ -416,15 +416,232 @@
     }
 
     /**
-     * 6. Offline Attendance Drafts Module (Privacy & Session Isolated)
+     * 6. Offline Attendance Drafts & Synchronization Engine
+     * Architecture:
+     * - UUIDv4 client-generated idempotency keys
+     * - User-scoped storage isolation (purged on logout/user switch)
+     * - Multi-tab lock protection & structured states: pending, syncing, synced, conflict, failed
+     * - IndexedDB primary storage with resilient localStorage fallback
+     * - Data minimization: records ONLY student_record_id, status (present/absent/late/leave/half_day), and remarks
+     * - Conflict resolution: prompts user when server has newer records rather than silently overwriting
      */
-    function purgeAllAttendanceDrafts() {
-        for (var i = localStorage.length - 1; i >= 0; i--) {
-            var key = localStorage.key(i);
-            if (key && (key.indexOf('lav_sms_att_') === 0 || key === 'lav_sms_attendance_drafts')) {
-                localStorage.removeItem(key);
-            }
+
+    function generateUUID() {
+        if (window.crypto && window.crypto.randomUUID) {
+            return window.crypto.randomUUID();
         }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    // Data minimization: Store ONLY student IDs and validated status codes ('P', 'A', 'L', 'H' or 'present', 'absent', 'late', 'leave', 'half_day')
+    var VALID_STATUSES = ['present', 'absent', 'late', 'leave', 'half_day'];
+    var STATUS_MAP = {
+        'P': 'present',
+        'A': 'absent',
+        'L': 'late',
+        'LV': 'leave',
+        'H': 'half_day'
+    };
+
+    // Storage abstraction: IndexedDB with localStorage fallback
+    var PwaAttendanceStore = {
+        dbName: 'lav_sms_pwa_db',
+        dbVersion: 1,
+        storeName: 'attendance_drafts',
+        _db: null,
+
+        openDb: function (callback) {
+            if (this._db) {
+                return callback(null, this._db);
+            }
+            if (!window.indexedDB) {
+                return callback(new Error('IndexedDB not supported'), null);
+            }
+
+            var self = this;
+            var request = window.indexedDB.open(this.dbName, this.dbVersion);
+
+            request.onupgradeneeded = function (event) {
+                var db = event.target.result;
+                if (!db.objectStoreNames.contains(self.storeName)) {
+                    var store = db.createObjectStore(self.storeName, { keyPath: 'client_uuid' });
+                    store.createIndex('user_id', 'user_id', { unique: false });
+                    store.createIndex('sync_status', 'sync_status', { unique: false });
+                    store.createIndex('batch_key', 'batch_key', { unique: false });
+                }
+            };
+
+            request.onsuccess = function (event) {
+                self._db = event.target.result;
+                callback(null, self._db);
+            };
+
+            request.onerror = function (event) {
+                console.warn('[PWA DB] IndexedDB open failed:', event.target.error);
+                callback(event.target.error, null);
+            };
+        },
+
+        getFallbackKey: function () {
+            var userId = window.PWA_USER_ID;
+            return userId ? 'lav_sms_att_drafts_uid_' + userId : null;
+        },
+
+        getAll: function (callback) {
+            var userId = window.PWA_USER_ID;
+            if (!userId) {
+                return callback(null, []);
+            }
+
+            var self = this;
+            this.openDb(function (err, db) {
+                if (err || !db) {
+                    // LocalStorage fallback
+                    var key = self.getFallbackKey();
+                    if (!key) return callback(null, []);
+                    try {
+                        var raw = localStorage.getItem(key);
+                        var data = raw ? JSON.parse(raw) : {};
+                        var list = [];
+                        for (var k in data) {
+                            if (Object.prototype.hasOwnProperty.call(data, k)) {
+                                list.push(data[k]);
+                            }
+                        }
+                        return callback(null, list);
+                    } catch (e) {
+                        console.error('[PWA DB] LocalStorage read corruption prevented:', e);
+                        return callback(null, []);
+                    }
+                }
+
+                try {
+                    var tx = db.transaction(self.storeName, 'readonly');
+                    var store = tx.objectStore(self.storeName);
+                    var index = store.index('user_id');
+                    var request = index.getAll(IDBKeyRange.only(userId));
+
+                    request.onsuccess = function () {
+                        callback(null, request.result || []);
+                    };
+                    request.onerror = function () {
+                        callback(request.error, []);
+                    };
+                } catch (e) {
+                    callback(e, []);
+                }
+            });
+        },
+
+        put: function (draft, callback) {
+            var self = this;
+            this.openDb(function (err, db) {
+                if (err || !db) {
+                    var key = self.getFallbackKey();
+                    if (!key) return callback && callback(new Error('Unauthenticated'));
+                    try {
+                        var raw = localStorage.getItem(key);
+                        var data = raw ? JSON.parse(raw) : {};
+                        data[draft.client_uuid] = draft;
+                        localStorage.setItem(key, JSON.stringify(data));
+                        if (callback) callback(null, draft);
+                    } catch (e) {
+                        console.error('[PWA DB] LocalStorage quota/write error:', e);
+                        if (callback) callback(e);
+                    }
+                    return;
+                }
+
+                try {
+                    var tx = db.transaction(self.storeName, 'readwrite');
+                    var store = tx.objectStore(self.storeName);
+                    var req = store.put(draft);
+                    req.onsuccess = function () {
+                        if (callback) callback(null, draft);
+                    };
+                    req.onerror = function () {
+                        if (callback) callback(req.error);
+                    };
+                } catch (e) {
+                    if (callback) callback(e);
+                }
+            });
+        },
+
+        delete: function (clientUuid, callback) {
+            var self = this;
+            this.openDb(function (err, db) {
+                if (err || !db) {
+                    var key = self.getFallbackKey();
+                    if (!key) return callback && callback(null);
+                    try {
+                        var raw = localStorage.getItem(key);
+                        var data = raw ? JSON.parse(raw) : {};
+                        delete data[clientUuid];
+                        localStorage.setItem(key, JSON.stringify(data));
+                        if (callback) callback(null);
+                    } catch (e) {
+                        if (callback) callback(e);
+                    }
+                    return;
+                }
+
+                try {
+                    var tx = db.transaction(self.storeName, 'readwrite');
+                    var store = tx.objectStore(self.storeName);
+                    var req = store.delete(clientUuid);
+                    req.onsuccess = function () {
+                        if (callback) callback(null);
+                    };
+                    req.onerror = function () {
+                        if (callback) callback(req.error);
+                    };
+                } catch (e) {
+                    if (callback) callback(e);
+                }
+            });
+        },
+
+        clearAll: function (callback) {
+            var self = this;
+            // Clear localStorage
+            for (var i = localStorage.length - 1; i >= 0; i--) {
+                var key = localStorage.key(i);
+                if (key && (key.indexOf('lav_sms_att_') === 0 || key === 'lav_sms_attendance_drafts')) {
+                    localStorage.removeItem(key);
+                }
+            }
+
+            // Clear IndexedDB
+            this.openDb(function (err, db) {
+                if (err || !db) {
+                    if (callback) callback(null);
+                    return;
+                }
+                try {
+                    var tx = db.transaction(self.storeName, 'readwrite');
+                    var store = tx.objectStore(self.storeName);
+                    var req = store.clear();
+                    req.onsuccess = function () {
+                        if (callback) callback(null);
+                    };
+                    req.onerror = function () {
+                        if (callback) callback(req.error);
+                    };
+                } catch (e) {
+                    if (callback) callback(e);
+                }
+            });
+        }
+    };
+
+    function purgeAllAttendanceDrafts() {
+        PwaAttendanceStore.clearAll(function () {
+            console.log('[PWA Attendance] Session drafts purged for shared-device isolation.');
+        });
     }
 
     function enforceUserSessionIsolation() {
@@ -455,64 +672,357 @@
         }
     });
 
+    /**
+     * Public PwaAttendance API
+     */
     window.PwaAttendance = {
-        getStorageKey: function () {
+        saveDraft: function (params, callback) {
             var userId = window.PWA_USER_ID;
-            return userId ? 'lav_sms_att_drafts_uid_' + userId : null;
-        },
-        saveDraft: function (classId, sectionId, dateBs, records) {
-            var storageKey = this.getStorageKey();
-            if (!storageKey) {
-                console.warn('[PWA Attendance] Draft saving skipped: Unauthenticated user.');
-                return null;
+            if (!userId) {
+                var err = new Error('Cannot save attendance draft: User is unauthenticated.');
+                console.warn('[PWA Attendance]', err.message);
+                if (callback) callback(err, null);
+                return;
             }
 
-            // Data minimization: Store ONLY student IDs and validated status codes ('P','A','L','H')
-            var sanitizedRecords = {};
+            var classId = parseInt(params.my_class_id, 10);
+            var sectionId = params.section_id ? parseInt(params.section_id, 10) : null;
+            var dateBs = String(params.attendance_date_bs || '').trim();
+            var records = params.students || {};
+
+            // Data minimization & validation: Store ONLY student_record_id, validated status, and optional remarks
+            var sanitizedStudents = {};
             if (typeof records === 'object' && records !== null) {
                 for (var stId in records) {
                     if (Object.prototype.hasOwnProperty.call(records, stId) && /^\d+$/.test(stId)) {
-                        var status = String(records[stId]).trim().toUpperCase();
-                        if (['P', 'A', 'L', 'H'].indexOf(status) !== -1) {
-                            sanitizedRecords[parseInt(stId, 10)] = status;
+                        var rawStatus = records[stId].status || records[stId];
+                        var status = String(rawStatus).trim().toLowerCase();
+                        if (STATUS_MAP[status.toUpperCase()]) {
+                            status = STATUS_MAP[status.toUpperCase()];
+                        }
+                        if (VALID_STATUSES.indexOf(status) !== -1) {
+                            sanitizedStudents[parseInt(stId, 10)] = {
+                                status: status,
+                                remarks: records[stId].remarks ? String(records[stId].remarks).substring(0, 255) : ''
+                            };
                         }
                     }
                 }
             }
 
-            var drafts = this.getDrafts();
-            var draftKey = classId + '_' + sectionId + '_' + dateBs;
-            drafts[draftKey] = {
-                draft_id: 'draft_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
-                class_id: parseInt(classId, 10),
-                section_id: parseInt(sectionId, 10),
-                date_bs: String(dateBs).trim(),
-                records: sanitizedRecords,
-                saved_at: new Date().toISOString(),
-                sync_status: 'draft'
-            };
-            localStorage.setItem(storageKey, JSON.stringify(drafts));
-            return draftKey;
-        },
-        getDrafts: function () {
-            var storageKey = this.getStorageKey();
-            if (!storageKey) return {};
+            var batchKey = classId + '_' + (sectionId || 0) + '_' + dateBs;
+            var clientUuid = params.client_uuid || generateUUID();
 
-            try {
-                return JSON.parse(localStorage.getItem(storageKey)) || {};
-            } catch (e) {
-                return {};
+            var draft = {
+                client_uuid: clientUuid,
+                schema_version: 1,
+                user_id: userId,
+                my_class_id: classId,
+                class_name: params.class_name || ('Class ' + classId),
+                section_id: sectionId,
+                section_name: params.section_name || (sectionId ? ('Sec ' + sectionId) : 'All Sections'),
+                attendance_date_bs: dateBs,
+                students: sanitizedStudents,
+                total_students: Object.keys(sanitizedStudents).length,
+                batch_key: batchKey,
+                created_at: params.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                sync_status: 'pending',
+                sync_attempts: 0,
+                last_sync_error: null
+            };
+
+            PwaAttendanceStore.put(draft, function (e, saved) {
+                if (e) {
+                    console.error('[PWA Attendance] Failed to save draft:', e);
+                    if (callback) callback(e, null);
+                } else {
+                    console.log('[PWA Attendance] Draft saved successfully:', clientUuid);
+                    if (callback) callback(null, saved);
+                }
+            });
+        },
+
+        getDrafts: function (callback) {
+            PwaAttendanceStore.getAll(callback);
+        },
+
+        deleteDraft: function (clientUuid, callback) {
+            PwaAttendanceStore.delete(clientUuid, callback);
+        },
+
+        syncDraft: function (clientUuid, forceOverwrite, callback) {
+            var self = this;
+            PwaAttendanceStore.getAll(function (err, drafts) {
+                if (err) return callback && callback(err);
+
+                var draft = null;
+                for (var i = 0; i < drafts.length; i++) {
+                    if (drafts[i].client_uuid === clientUuid) {
+                        draft = drafts[i];
+                        break;
+                    }
+                }
+
+                if (!draft) {
+                    return callback && callback(new Error('Draft not found: ' + clientUuid));
+                }
+
+                // Prevent concurrent submissions of same draft
+                if (draft.sync_status === 'syncing') {
+                    console.warn('[PWA Attendance] Draft already syncing:', clientUuid);
+                    return callback && callback(new Error('Draft synchronization already in-flight.'));
+                }
+
+                // Mark draft syncing
+                draft.sync_status = 'syncing';
+                PwaAttendanceStore.put(draft, function () {
+                    var syncUrl = window.PWA_ATTENDANCE_SYNC_URL || './attendance/sync';
+                    var csrfToken = document.querySelector('meta[name="csrf-token"]') ?
+                        document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
+
+                    var payload = {
+                        idempotency_key: draft.client_uuid,
+                        my_class_id: draft.my_class_id,
+                        section_id: draft.section_id,
+                        attendance_date_bs: draft.attendance_date_bs,
+                        students: draft.students,
+                        created_at_client: draft.created_at,
+                        force_overwrite: Boolean(forceOverwrite)
+                    };
+
+                    fetch(syncUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken
+                        },
+                        body: JSON.stringify(payload)
+                    })
+                    .then(function (response) {
+                        return response.json().then(function (data) {
+                            return { status: response.status, body: data };
+                        });
+                    })
+                    .then(function (res) {
+                        if (res.status === 200 && res.body.status === 'success') {
+                            draft.sync_status = 'synced';
+                            draft.last_sync_error = null;
+                            draft.synced_at = res.body.data && res.body.data.synced_at ? res.body.data.synced_at : new Date().toISOString();
+                            PwaAttendanceStore.put(draft, function () {
+                                if (callback) callback(null, { status: 'success', draft: draft, response: res.body });
+                            });
+                        } else if (res.status === 409 || res.body.status === 'conflict') {
+                            draft.sync_status = 'conflict';
+                            draft.last_sync_error = res.body.message || 'Server attendance was modified after draft was created.';
+                            draft.conflict_info = res.body;
+                            PwaAttendanceStore.put(draft, function () {
+                                if (callback) callback(null, { status: 'conflict', draft: draft, response: res.body });
+                            });
+                        } else {
+                            draft.sync_status = 'failed';
+                            draft.last_sync_error = res.body.message || 'Server rejected synchronization request.';
+                            PwaAttendanceStore.put(draft, function () {
+                                if (callback) callback(null, { status: 'failed', draft: draft, response: res.body });
+                            });
+                        }
+                    })
+                    .catch(function (fetchErr) {
+                        draft.sync_attempts = (draft.sync_attempts || 0) + 1;
+                        draft.sync_status = draft.sync_attempts >= 3 ? 'failed' : 'pending';
+                        draft.last_sync_error = 'Network connection failed. Ready to retry.';
+                        PwaAttendanceStore.put(draft, function () {
+                            if (callback) callback(fetchErr, { status: 'network_error', draft: draft });
+                        });
+                    });
+                });
+            });
+        },
+
+        syncAllPending: function (callback) {
+            var self = this;
+            this.getDrafts(function (err, drafts) {
+                if (err) return callback && callback(err);
+
+                var pending = drafts.filter(function (d) {
+                    return d.sync_status === 'pending' || d.sync_status === 'failed';
+                });
+
+                if (pending.length === 0) {
+                    return callback && callback(null, { total: 0, synced: 0 });
+                }
+
+                var index = 0;
+                var results = { total: pending.length, succeeded: 0, conflicts: 0, failed: 0 };
+
+                function processNext() {
+                    if (index >= pending.length) {
+                        return callback && callback(null, results);
+                    }
+                    var current = pending[index++];
+                    self.syncDraft(current.client_uuid, false, function (syncErr, res) {
+                        if (res && res.status === 'success') results.succeeded++;
+                        else if (res && res.status === 'conflict') results.conflicts++;
+                        else results.failed++;
+                        processNext();
+                    });
+                }
+
+                processNext();
+            });
+        },
+
+        purgeAll: purgeAllAttendanceDrafts
+    };
+
+    /**
+     * Attendance UI Controller for Blade Views
+     */
+    window.PwaAttendanceUI = {
+        init: function () {
+            var widget = document.getElementById('pwa-attendance-offline-widget');
+            if (!widget) return;
+
+            this.refreshWidget();
+
+            window.addEventListener('online', this.refreshWidget.bind(this));
+            window.addEventListener('offline', this.refreshWidget.bind(this));
+        },
+
+        refreshWidget: function () {
+            var widget = document.getElementById('pwa-attendance-offline-widget');
+            if (!widget) return;
+
+            window.PwaAttendance.getDrafts(function (err, drafts) {
+                if (err || !drafts || drafts.length === 0) {
+                    widget.style.display = 'none';
+                    return;
+                }
+
+                widget.style.display = 'block';
+                var countBadge = document.getElementById('pwa-pending-count-badge');
+                if (countBadge) countBadge.textContent = drafts.length;
+
+                var tbody = document.getElementById('pwa-drafts-tbody');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+
+                drafts.forEach(function (d) {
+                    var tr = document.createElement('tr');
+                    var badgeClass = 'badge-warning';
+                    var statusText = 'Pending';
+
+                    if (d.sync_status === 'syncing') {
+                        badgeClass = 'badge-info';
+                        statusText = 'Syncing...';
+                    } else if (d.sync_status === 'synced') {
+                        badgeClass = 'badge-success';
+                        statusText = 'Synced ✓';
+                    } else if (d.sync_status === 'conflict') {
+                        badgeClass = 'badge-danger';
+                        statusText = 'Conflict !';
+                    } else if (d.sync_status === 'failed') {
+                        badgeClass = 'badge-secondary';
+                        statusText = 'Failed';
+                    }
+
+                    var actions = '';
+                    if (d.sync_status === 'conflict') {
+                        actions = '<button type="button" class="btn btn-xs btn-outline-danger mr-1" onclick="PwaAttendanceUI.resolveConflict(\'' + d.client_uuid + '\')"><i class="icon-warning22"></i> Resolve Conflict</button>';
+                    } else if (d.sync_status !== 'synced') {
+                        actions = '<button type="button" class="btn btn-xs btn-outline-primary mr-1" onclick="PwaAttendanceUI.syncSingle(\'' + d.client_uuid + '\')"><i class="icon-sync"></i> Sync</button>';
+                    }
+                    actions += '<button type="button" class="btn btn-xs btn-outline-secondary" onclick="PwaAttendanceUI.discardSingle(\'' + d.client_uuid + '\')"><i class="icon-trash"></i> Discard</button>';
+
+                    tr.innerHTML =
+                        '<td class="font-weight-bold">' + d.attendance_date_bs + ' BS</td>' +
+                        '<td>' + (d.class_name || ('Class ' + d.my_class_id)) + ' - ' + (d.section_name || 'All') + '</td>' +
+                        '<td><span class="badge badge-light">' + (d.total_students || Object.keys(d.students).length) + ' Students</span></td>' +
+                        '<td><span class="badge ' + badgeClass + '">' + statusText + '</span>' + (d.last_sync_error ? '<div class="text-danger font-size-xs mt-1">' + d.last_sync_error + '</div>' : '') + '</td>' +
+                        '<td class="text-right">' + actions + '</td>';
+
+                    tbody.appendChild(tr);
+                });
+            });
+        },
+
+        syncAll: function () {
+            var btn = document.getElementById('pwa-btn-sync-all');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="icon-spinner2 spinner mr-1"></i> Syncing...';
+            }
+
+            var self = this;
+            window.PwaAttendance.syncAllPending(function (err, results) {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="icon-sync mr-1"></i> Sync All';
+                }
+                self.refreshWidget();
+
+                if (results && results.conflicts > 0) {
+                    alert('Sync completed with ' + results.succeeded + ' successful and ' + results.conflicts + ' conflict(s). Please review conflicts.');
+                } else if (results && results.succeeded > 0) {
+                    alert('Successfully synchronized ' + results.succeeded + ' attendance batch(es) to the server.');
+                    window.location.reload();
+                } else if (results && results.total === 0) {
+                    alert('No pending attendance drafts to sync.');
+                }
+            });
+        },
+
+        syncSingle: function (uuid) {
+            var self = this;
+            window.PwaAttendance.syncDraft(uuid, false, function (err, res) {
+                self.refreshWidget();
+                if (res && res.status === 'success') {
+                    alert('Attendance batch synchronized successfully!');
+                    window.location.reload();
+                } else if (res && res.status === 'conflict') {
+                    self.resolveConflict(uuid);
+                } else {
+                    alert('Sync failed: ' + (res && res.response && res.response.message ? res.response.message : (err ? err.message : 'Unknown error')));
+                }
+            });
+        },
+
+        resolveConflict: function (uuid) {
+            var self = this;
+            var choice = confirm(
+                'Attendance records on the server were modified after your offline draft was saved.\n\n' +
+                'Click [OK] to OVERWRITE the server with your offline draft.\n' +
+                'Click [Cancel] to review or discard your offline draft.'
+            );
+
+            if (choice) {
+                window.PwaAttendance.syncDraft(uuid, true, function (err, res) {
+                    self.refreshWidget();
+                    if (res && res.status === 'success') {
+                        alert('Server attendance updated successfully with your draft.');
+                        window.location.reload();
+                    } else {
+                        alert('Failed to overwrite server: ' + (res && res.response ? res.response.message : 'Error'));
+                    }
+                });
             }
         },
-        clearDraft: function (draftKey) {
-            var storageKey = this.getStorageKey();
-            if (!storageKey) return;
 
-            var drafts = this.getDrafts();
-            delete drafts[draftKey];
-            localStorage.setItem(storageKey, JSON.stringify(drafts));
-        },
-        purgeAll: purgeAllAttendanceDrafts
+        discardSingle: function (uuid) {
+            var confirmed = confirm(
+                'WARNING: This offline attendance draft has not been finalized on the server.\n\n' +
+                'Discarding it will PERMANENTLY DELETE your locally saved entries for this date.\n\n' +
+                'Are you sure you want to discard this draft?'
+            );
+
+            if (confirmed) {
+                var self = this;
+                window.PwaAttendance.deleteDraft(uuid, function () {
+                    self.refreshWidget();
+                });
+            }
+        }
     };
 
     // Run session isolation check immediately
@@ -523,8 +1033,12 @@
 
     // Initialize on DOM load
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', registerServiceWorker);
+        document.addEventListener('DOMContentLoaded', function () {
+            registerServiceWorker();
+            window.PwaAttendanceUI.init();
+        });
     } else {
         registerServiceWorker();
+        window.PwaAttendanceUI.init();
     }
 })();

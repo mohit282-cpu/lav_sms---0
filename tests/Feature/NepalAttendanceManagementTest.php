@@ -658,4 +658,244 @@ class NepalAttendanceManagementTest extends TestCase
             $this->assertCount($sections->count(), $dataAdmin);
         }
     }
+
+    /**
+     * Test authorized admin and assigned teacher can synchronize an offline attendance batch.
+     */
+    public function test_authorized_admin_and_teacher_can_sync_offline_attendance_batch()
+    {
+        $admin = $this->getAdmin();
+        $class = MyClass::first();
+        $students = StudentRecord::where('my_class_id', $class->id)->take(2)->get();
+        $this->assertNotEmpty($students);
+
+        $uuid = 'test-sync-uuid-' . uniqid();
+        $payload = [
+            'idempotency_key' => $uuid,
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-09',
+            'created_at_client' => now()->subMinutes(5)->toIso8601String(),
+            'students' => [
+                $students[0]->id => ['status' => 'present', 'remarks' => 'On time'],
+                $students[1]->id => ['status' => 'absent', 'remarks' => 'Fever'],
+            ],
+        ];
+
+        $response = $this->actingAs($admin)->postJson(route('attendance.sync'), $payload);
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'synced' => true,
+            'idempotency_key' => $uuid,
+        ]);
+
+        $this->assertDatabaseHas('student_attendances', [
+            'student_record_id' => $students[0]->id,
+            'attendance_date_bs' => '2083-07-09',
+            'status' => 'present',
+        ]);
+        $this->assertDatabaseHas('student_attendances', [
+            'student_record_id' => $students[1]->id,
+            'attendance_date_bs' => '2083-07-09',
+            'status' => 'absent',
+        ]);
+    }
+
+    /**
+     * Test unauthenticated requests to sync endpoint are rejected.
+     */
+    public function test_unauthenticated_user_cannot_sync_attendance()
+    {
+        $response = $this->postJson(route('attendance.sync'), [
+            'idempotency_key' => 'unauth-key-123',
+            'my_class_id' => 1,
+            'attendance_date_bs' => '2083-07-09',
+            'students' => [1 => ['status' => 'present']],
+        ]);
+
+        $this->assertTrue(in_array($response->status(), [401, 302], true));
+    }
+
+    /**
+     * Test unauthorized teacher cannot sync attendance for an unassigned class.
+     */
+    public function test_unauthorized_teacher_cannot_sync_unassigned_class_or_section()
+    {
+        $teacher = $this->getTeacher();
+        $class = MyClass::first();
+
+        // Ensure teacher has NO assignments in this class
+        Section::where('teacher_id', $teacher->id)->update(['teacher_id' => null]);
+
+        $students = StudentRecord::where('my_class_id', $class->id)->take(1)->get();
+        $this->assertNotEmpty($students);
+
+        $payload = [
+            'idempotency_key' => 'unauthorized-teacher-' . uniqid(),
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-09',
+            'students' => [
+                $students[0]->id => ['status' => 'present', 'remarks' => ''],
+            ],
+        ];
+
+        $response = $this->actingAs($teacher)->postJson(route('attendance.sync'), $payload);
+        $response->assertStatus(403);
+    }
+
+    /**
+     * Test invalid status or invalid BS date in sync payload returns 422.
+     */
+    public function test_invalid_attendance_status_or_date_is_rejected_in_sync()
+    {
+        $admin = $this->getAdmin();
+        $class = MyClass::first();
+        $student = StudentRecord::where('my_class_id', $class->id)->first();
+
+        // 1. Invalid status
+        $resInvalidStatus = $this->actingAs($admin)->postJson(route('attendance.sync'), [
+            'idempotency_key' => 'invalid-status-key',
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-09',
+            'students' => [
+                $student->id => ['status' => 'invalid_status_value'],
+            ],
+        ]);
+        $resInvalidStatus->assertStatus(422);
+
+        // 2. Invalid date
+        $resInvalidDate = $this->actingAs($admin)->postJson(route('attendance.sync'), [
+            'idempotency_key' => 'invalid-date-key',
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-99-99',
+            'students' => [
+                $student->id => ['status' => 'present'],
+            ],
+        ]);
+        $resInvalidDate->assertStatus(422);
+    }
+
+    /**
+     * Test idempotency key prevents duplicate writes and returns cached confirmation on retry.
+     */
+    public function test_idempotency_prevents_duplicate_sync_commits_on_retries()
+    {
+        $admin = $this->getAdmin();
+        $class = MyClass::first();
+        $student = StudentRecord::where('my_class_id', $class->id)->first();
+
+        $uuid = 'idempotent-test-' . uniqid();
+        $payload = [
+            'idempotency_key' => $uuid,
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-09',
+            'students' => [
+                $student->id => ['status' => 'present', 'remarks' => 'Initial sync'],
+            ],
+        ];
+
+        // First attempt: Commits
+        $res1 = $this->actingAs($admin)->postJson(route('attendance.sync'), $payload);
+        $res1->assertStatus(200);
+        $res1->assertJson(['status' => 'success', 'synced' => true]);
+
+        $initialAuditCount = AttendanceAuditTrail::where('attendance_date_bs', '2083-07-09')->count();
+
+        // Second attempt with SAME idempotency key (simulating timeout recovery retry)
+        $res2 = $this->actingAs($admin)->postJson(route('attendance.sync'), $payload);
+        $res2->assertStatus(200);
+        $res2->assertJson([
+            'status' => 'success',
+            'synced' => true,
+            'idempotent_replay' => true,
+            'idempotency_key' => $uuid,
+        ]);
+
+        // Audit trail count must not have duplicated
+        $afterRetryAuditCount = AttendanceAuditTrail::where('attendance_date_bs', '2083-07-09')->count();
+        $this->assertEquals($initialAuditCount, $afterRetryAuditCount, 'Retrying with identical idempotency key must not duplicate database changes');
+    }
+
+    /**
+     * Test conflict detection flags an error if server record was modified after client draft was created.
+     */
+    public function test_conflict_detection_detects_server_modifications_and_requires_review()
+    {
+        $admin = $this->getAdmin();
+        $class = MyClass::first();
+        $student = StudentRecord::where('my_class_id', $class->id)->first();
+
+        // 1. Initial record exists on server and was updated at 10:00
+        StudentAttendance::updateOrCreate(
+            ['student_record_id' => $student->id, 'attendance_date' => '2026-10-26'],
+            [
+                'user_id' => $student->user_id,
+                'my_class_id' => $class->id,
+                'attendance_date_bs' => '2083-07-09',
+                'status' => 'absent',
+                'updated_at' => now(),
+            ]
+        );
+
+        // 2. Client submits draft that was created in the past (e.g. 1 hour ago before server update)
+        $clientCreatedTime = now()->subMinutes(60)->toIso8601String();
+        $conflictPayload = [
+            'idempotency_key' => 'conflict-test-' . uniqid(),
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-09',
+            'created_at_client' => $clientCreatedTime,
+            'force_overwrite' => false,
+            'students' => [
+                $student->id => ['status' => 'present', 'remarks' => 'I marked him present earlier'],
+            ],
+        ];
+
+        $response = $this->actingAs($admin)->postJson(route('attendance.sync'), $conflictPayload);
+        $response->assertStatus(409);
+        $response->assertJson([
+            'status' => 'conflict',
+            'synced' => false,
+        ]);
+
+        // Verify server record was NOT silently overwritten
+        $serverRecord = StudentAttendance::where('student_record_id', $student->id)
+            ->where('attendance_date_bs', '2083-07-09')
+            ->first();
+        $this->assertEquals('absent', $serverRecord->status);
+    }
+
+    /**
+     * Test user can resolve conflict with explicit force_overwrite flag.
+     */
+    public function test_force_overwrite_resolves_conflict_when_user_approves()
+    {
+        $admin = $this->getAdmin();
+        $class = MyClass::first();
+        $student = StudentRecord::where('my_class_id', $class->id)->first();
+
+        $clientCreatedTime = now()->subMinutes(60)->toIso8601String();
+        $overwritePayload = [
+            'idempotency_key' => 'overwrite-test-' . uniqid(),
+            'my_class_id' => $class->id,
+            'attendance_date_bs' => '2083-07-09',
+            'created_at_client' => $clientCreatedTime,
+            'force_overwrite' => true, // User confirmed overwrite
+            'students' => [
+                $student->id => ['status' => 'late', 'remarks' => 'Confirmed late'],
+            ],
+        ];
+
+        $response = $this->actingAs($admin)->postJson(route('attendance.sync'), $overwritePayload);
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'synced' => true,
+        ]);
+
+        $serverRecord = StudentAttendance::where('student_record_id', $student->id)
+            ->where('attendance_date_bs', '2083-07-09')
+            ->first();
+        $this->assertEquals('late', $serverRecord->status);
+    }
 }
