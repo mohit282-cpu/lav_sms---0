@@ -222,6 +222,25 @@
                     <li class="nav-item">
                         <a href="{{ route('holidays.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['holidays.index', 'holidays.edit']) ? 'active' : '' }}"><i class="icon-calendar"></i> <span>{{ __('Holiday Calendar') }}</span></a>
                     </li>
+
+                    {{--Library Management--}}
+                    <li class="nav-item nav-item-submenu {{ in_array(Route::currentRouteName(), ['books.index', 'books.edit', 'books.show', 'books.circulations', 'books.categories', 'book_requests.index']) ? 'nav-item-expanded nav-item-open' : '' }}">
+                        <a href="#" class="nav-link"><i class="icon-books"></i> <span>{{ __('Library') }}</span></a>
+                        <ul class="nav nav-group-sub" data-submenu-title="{{ __('Library') }}">
+                            <li class="nav-item">
+                                <a href="{{ route('books.index') }}" class="nav-link {{ Route::is('books.index') ? 'active' : '' }}">{{ __('Books & Inventory') }}</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ route('books.circulations') }}" class="nav-link {{ Route::is('books.circulations') ? 'active' : '' }}">{{ __('Issue & Return') }}</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ route('book_requests.index') }}" class="nav-link {{ Route::is('book_requests.index') ? 'active' : '' }}">{{ __('Book Requests') }}</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ route('books.categories') }}" class="nav-link {{ Route::is('books.categories') ? 'active' : '' }}">{{ __('Book Categories') }}</a>
+                            </li>
+                        </ul>
+                    </li>
                 @endif
 
                 {{--Attendance Management (Nepal BS)--}}

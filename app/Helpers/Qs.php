@@ -68,6 +68,11 @@ class Qs
         return ['admin', 'super_admin', 'teacher'];
     }
 
+    public static function getTeamLibrary()
+    {
+        return ['admin', 'super_admin', 'librarian'];
+    }
+
     public static function getTeamAcademic()
     {
         return ['admin', 'super_admin', 'teacher', 'student'];
@@ -128,6 +133,16 @@ class Qs
     public static function userIsTeamSAT()
     {
         return in_array(Auth::user()->user_type, self::getTeamSAT());
+    }
+
+    public static function userIsTeamLibrary()
+    {
+        return Auth::check() && in_array(Auth::user()->user_type, self::getTeamLibrary());
+    }
+
+    public static function userIsLibrarian()
+    {
+        return Auth::check() && Auth::user()->user_type == 'librarian';
     }
 
     public static function userIsAcademic()

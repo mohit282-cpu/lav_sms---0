@@ -174,6 +174,31 @@ Route::group(['middleware' => 'auth'], function () {
             Route::get('staff-attendance/monthly', 'StaffAttendanceController@monthly')->name('staff_attendance.monthly');
         });
 
+        /*************** Library & Books Management *****************/
+        Route::get('books/catalogue', 'BookController@catalogue')->name('books.catalogue');
+        Route::get('books/categories', 'BookController@categories')->name('books.categories');
+        Route::post('books/categories', 'BookController@storeCategory')->name('books.categories.store');
+        Route::put('books/categories/{id}', 'BookController@updateCategory')->name('books.categories.update');
+        Route::delete('books/categories/{id}', 'BookController@destroyCategory')->name('books.categories.destroy');
+
+        Route::get('books/circulations', 'BookController@circulations')->name('books.circulations');
+        Route::post('books/issue', 'BookController@issue')->name('books.issue');
+        Route::post('books/circulations/issue', 'BookController@issue')->name('books.issue_book');
+        Route::match(['post', 'put'], 'books/return/{id}', 'BookController@returnBook')->name('books.return');
+        Route::match(['post', 'put'], 'books/circulations/{id}/return', 'BookController@returnBook')->name('books.return_book');
+
+        Route::resource('books', 'BookController');
+
+        Route::get('book_requests/my', 'BookRequestController@myRequests')->name('book_requests.my_requests');
+        Route::get('book_requests', 'BookRequestController@index')->name('book_requests.index');
+        Route::post('book_requests', 'BookRequestController@store')->name('book_requests.store');
+        Route::match(['post', 'put'], 'book_requests/{id}/approve', 'BookRequestController@approve')->name('book_requests.approve');
+        Route::match(['post', 'put'], 'book_requests/{id}/reject', 'BookRequestController@reject')->name('book_requests.reject');
+        Route::match(['post', 'put'], 'book_requests/{id}/cancel', 'BookRequestController@cancel')->name('book_requests.cancel');
+        Route::match(['post', 'put'], 'book_requests/{id}/issue', 'BookRequestController@issueFromRequest')->name('book_requests.issue_from_request');
+        Route::match(['post', 'put'], 'book_requests/{id}/issue_from_request', 'BookRequestController@issueFromRequest');
+        Route::match(['post', 'put'], 'book_requests/{id}/issue_request', 'BookRequestController@issueFromRequest')->name('book_requests.issue');
+
     });
 
     /************************ AJAX ****************************/

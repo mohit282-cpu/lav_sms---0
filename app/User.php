@@ -112,4 +112,9 @@ class User extends Authenticatable
 
         return $default;
     }
+
+    public function bookRequests()
+    {
+        return $this->hasMany(\App\Models\BookRequest::class, 'user_id');
+    }
 }
