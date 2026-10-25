@@ -43,4 +43,9 @@ class StudentRecord extends Eloquent
     {
         return $this->hasMany(StudentAttendance::class, 'student_record_id');
     }
+
+    public function getPhotoAttribute()
+    {
+        return $this->user ? $this->user->photo : asset('global_assets/images/user.png');
+    }
 }

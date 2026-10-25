@@ -64,4 +64,52 @@ class User extends Authenticatable
     {
         return $this->hasMany(StaffRecord::class);
     }
+
+    public function getPhotoAttribute($value)
+    {
+        $default = asset('global_assets/images/user.png');
+
+        if (!$value) {
+            return $default;
+        }
+
+        // Default avatar referenced in any form (absolute or relative)
+        if (str_contains($value, 'user.png')) {
+            return $default;
+        }
+
+        // Uploaded photo with storage/ path
+        if (str_contains($value, 'storage/')) {
+            $storagePos = strpos($value, 'storage/');
+            $subPath = substr($value, $storagePos + 8);
+            if (file_exists(storage_path('app/public/' . $subPath))) {
+                return asset('storage/' . $subPath);
+            }
+            return $default;
+        }
+
+        // Relative path starting with uploads/
+        if (str_starts_with($value, 'uploads/')) {
+            if (file_exists(storage_path('app/public/' . $value))) {
+                return asset('storage/' . $value);
+            }
+            return $default;
+        }
+
+        // Full URL
+        if (filter_var($value, FILTER_VALIDATE_URL)) {
+            $path = parse_url($value, PHP_URL_PATH);
+            if ($path && str_contains($path, 'storage/')) {
+                $storagePos = strpos($path, 'storage/');
+                $subPath = substr($path, $storagePos + 8);
+                if (file_exists(storage_path('app/public/' . $subPath))) {
+                    return asset('storage/' . $subPath);
+                }
+                return $default;
+            }
+            return $value;
+        }
+
+        return $default;
+    }
 }
