@@ -64,9 +64,16 @@ class PaymentController extends Controller
     {
         if(!$st_id) {return Qs::goWithDanger();}
 
+        $st_id = Qs::decodeHash($st_id) ?: $st_id;
+        if(!$st_id) {return Qs::goWithDanger();}
+
+        $d['sr'] = $sr = $this->student->findByUserId($st_id)->first();
+        if(!$sr) {
+            return Qs::goWithDanger('payments.manage');
+        }
+
         $inv = $year ? $this->pay->getAllMyPR($st_id, $year) : $this->pay->getAllMyPR($st_id);
 
-        $d['sr'] = $this->student->findByUserId($st_id)->first();
         $pr = $inv->get();
         $d['uncleared'] = $pr->where('paid', 0);
         $d['cleared'] = $pr->where('paid', 1);
@@ -77,12 +84,18 @@ class PaymentController extends Controller
     public function receipts($pr_id)
     {
         if(!$pr_id) {return Qs::goWithDanger();}
+        $pr_id = Qs::decodeHash($pr_id) ?: $pr_id;
 
         try {
              $d['pr'] = $pr = $this->pay->getRecord(['id' => $pr_id])->with('receipt')->first();
         } catch (ModelNotFoundException $ex) {
             return back()->with('flash_danger', __('msg.rnf'));
         }
+
+        if(!$pr) {
+            return back()->with('flash_danger', __('msg.rnf'));
+        }
+
         $d['receipts'] = $pr->receipt;
         $d['payment'] = $pr->payment;
         $d['sr'] = $this->student->findByUserId($pr->student_id)->first();
@@ -96,12 +109,18 @@ class PaymentController extends Controller
     public function pdf_receipts($pr_id)
     {
         if(!$pr_id) {return Qs::goWithDanger();}
+        $pr_id = Qs::decodeHash($pr_id) ?: $pr_id;
 
         try {
             $d['pr'] = $pr = $this->pay->getRecord(['id' => $pr_id])->with('receipt')->first();
         } catch (ModelNotFoundException $ex) {
             return back()->with('flash_danger', __('msg.rnf'));
         }
+
+        if(!$pr) {
+            return back()->with('flash_danger', __('msg.rnf'));
+        }
+
         $d['receipts'] = $pr->receipt;
         $d['payment'] = $pr->payment;
         $d['sr'] = $sr =$this->student->findByUserId($pr->student_id)->first();
@@ -130,7 +149,11 @@ class PaymentController extends Controller
             'amt_paid' => 'required|numeric'
         ], [], ['amt_paid' => 'Amount Paid']);
 
+        $pr_id = Qs::decodeHash($pr_id) ?: $pr_id;
         $pr = $this->pay->findRecord($pr_id);
+        if(!$pr) {
+            return response()->json(['msg' => __('msg.rnf')], 404);
+        }
         $payment = $this->pay->find($pr->payment_id);
         $d['amt_paid'] = $amt_p = $pr->amt_paid + $req->amt_paid;
         $d['balance'] = $bal = $payment->amount - $amt_p;
@@ -227,6 +250,7 @@ class PaymentController extends Controller
 
     public function reset_record($id)
     {
+        $id = Qs::decodeHash($id) ?: $id;
         $pr['amt_paid'] = $pr['paid'] = $pr['balance'] = 0;
         $this->pay->updateRecord($id, $pr);
         $this->pay->deleteReceipts(['pr_id' => $id]);

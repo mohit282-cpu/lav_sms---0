@@ -69,4 +69,26 @@ class PaymentNepalYearTest extends TestCase
             $response->assertViewIs('pages.support_team.payments.edit');
         }
     }
+
+    public function test_payments_invoice_loads_with_hashed_student_id()
+    {
+        $student = \App\Models\StudentRecord::where('user_id', 55)->first();
+        if ($student) {
+            $response = $this->actingAs($this->admin)->get('/payments/invoice/5AzBaeRJveExNX');
+            $response->assertStatus(200);
+            $response->assertViewIs('pages.support_team.payments.invoice');
+            $response->assertSee('Mohit Shrestha');
+        }
+    }
+
+    public function test_payments_invoice_loads_with_bs_year()
+    {
+        $student = \App\Models\StudentRecord::where('user_id', 55)->first();
+        if ($student) {
+            $response = $this->actingAs($this->admin)->get('/payments/invoice/5AzBaeRJveExNX/2083/84%20BS');
+            $response->assertStatus(200);
+            $response->assertViewIs('pages.support_team.payments.invoice');
+            $response->assertSee('Mohit Shrestha');
+        }
+    }
 }
