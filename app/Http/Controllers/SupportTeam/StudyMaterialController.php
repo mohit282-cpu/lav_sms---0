@@ -71,14 +71,52 @@ class StudyMaterialController extends Controller
             'material_file.max' => 'The file size must not exceed 10MB.',
         ]);
 
-        // If teacher, verify assignment to class or subject
-        if ($user->user_type === 'teacher') {
-            $teachesClass = Section::where('my_class_id', $request->my_class_id)->where('teacher_id', $user->id)->exists();
-            $teachesSubject = $request->subject_id ? Subject::where('id', $request->subject_id)->where('teacher_id', $user->id)->exists() : false;
-            $classHasSubject = Subject::where('my_class_id', $request->my_class_id)->where('teacher_id', $user->id)->exists();
+        // Validate academic relationships
+        if ($request->filled('section_id')) {
+            $section = Section::where('id', $request->section_id)->where('my_class_id', $request->my_class_id)->first();
+            if (!$section) {
+                return back()->withInput()->with('flash_danger', __('The selected section does not belong to the selected class.'));
+            }
+        }
 
-            if (!$teachesClass && !$teachesSubject && !$classHasSubject) {
-                return back()->withInput()->with('flash_danger', __('You are not assigned to this class or subject.'));
+        if ($request->filled('subject_id')) {
+            $subject = Subject::where('id', $request->subject_id)->where('my_class_id', $request->my_class_id)->first();
+            if (!$subject) {
+                return back()->withInput()->with('flash_danger', __('The selected subject does not belong to the selected class.'));
+            }
+        }
+
+        // If teacher, strictly verify assignment to exact selected subject and/or class/section
+        if ($user->user_type === 'teacher') {
+            if ($request->filled('subject_id')) {
+                // When subject is selected, teacher must be assigned to that exact subject in that class
+                $teachesSubject = Subject::where('id', $request->subject_id)
+                    ->where('my_class_id', $request->my_class_id)
+                    ->where('teacher_id', $user->id)
+                    ->exists();
+
+                if (!$teachesSubject) {
+                    return back()->withInput()->with('flash_danger', __('You are not assigned to teach the selected subject in this class.'));
+                }
+            } else {
+                // When no subject is selected, teacher must teach a subject or section in this class
+                $teachesClass = Section::where('my_class_id', $request->my_class_id)->where('teacher_id', $user->id)->exists()
+                    || Subject::where('my_class_id', $request->my_class_id)->where('teacher_id', $user->id)->exists();
+
+                if (!$teachesClass) {
+                    return back()->withInput()->with('flash_danger', __('You are not assigned to this class.'));
+                }
+            }
+
+            if ($request->filled('section_id')) {
+                $isSectionTeacher = Section::where('id', $request->section_id)->where('teacher_id', $user->id)->exists();
+                $teachesSubjectInClass = $request->filled('subject_id')
+                    ? Subject::where('id', $request->subject_id)->where('teacher_id', $user->id)->exists()
+                    : Subject::where('my_class_id', $request->my_class_id)->where('teacher_id', $user->id)->exists();
+
+                if (!$isSectionTeacher && !$teachesSubjectInClass) {
+                    return back()->withInput()->with('flash_danger', __('You are not assigned to this section.'));
+                }
             }
         }
 
@@ -89,7 +127,7 @@ class StudyMaterialController extends Controller
         $fileSize = $file->getSize();
 
         // Extra check against dangerous extensions
-        $dangerousExtensions = ['php', 'phtml', 'phar', 'exe', 'sh', 'bat', 'cmd', 'js', 'vbs', 'ps1', 'cgi', 'pl'];
+        $dangerousExtensions = ['php', 'phtml', 'phar', 'exe', 'sh', 'bat', 'cmd', 'js', 'vbs', 'ps1', 'cgi', 'pl', 'py', 'htm', 'html'];
         if (in_array(strtolower($extension), $dangerousExtensions, true)) {
             return back()->withInput()->with('flash_danger', __('Executable and script files are strictly prohibited.'));
         }
@@ -97,18 +135,25 @@ class StudyMaterialController extends Controller
         // Store privately
         $storedPath = $file->store('study_materials');
 
-        StudyMaterial::create([
-            'title' => $validated['title'],
-            'description' => $validated['description'] ?? null,
-            'file_path' => $storedPath,
-            'file_name' => $safeOriginalName,
-            'file_size' => $fileSize,
-            'file_type' => strtolower($extension),
-            'my_class_id' => $validated['my_class_id'],
-            'section_id' => $validated['section_id'] ?? null,
-            'subject_id' => $validated['subject_id'] ?? null,
-            'teacher_id' => $user->id,
-        ]);
+        try {
+            StudyMaterial::create([
+                'title' => $validated['title'],
+                'description' => $validated['description'] ?? null,
+                'file_path' => $storedPath,
+                'file_name' => $safeOriginalName,
+                'file_size' => $fileSize,
+                'file_type' => strtolower($extension),
+                'my_class_id' => $validated['my_class_id'],
+                'section_id' => $validated['section_id'] ?? null,
+                'subject_id' => $validated['subject_id'] ?? null,
+                'teacher_id' => $user->id,
+            ]);
+        } catch (\Throwable $e) {
+            if (Storage::exists($storedPath)) {
+                Storage::delete($storedPath);
+            }
+            return back()->withInput()->with('flash_danger', __('An error occurred while saving the study material. Please try again.'));
+        }
 
         return redirect()->route('study_materials.index')->with('flash_success', __('Study material uploaded successfully.'));
     }
@@ -130,16 +175,17 @@ class StudyMaterialController extends Controller
         $user = Auth::user();
         $material = StudyMaterial::findOrFail($id);
 
-        // Allowed only for Super Admin or the uploading teacher
-        if (!Qs::userIsSuperAdmin() && $material->teacher_id !== $user->id) {
+        // Allowed only for Super Admin, Admin, or the uploading teacher
+        if (!Qs::userIsTeamSA() && $material->teacher_id !== $user->id) {
             abort(403, 'Unauthorized action.');
         }
 
-        if (Storage::exists($material->file_path)) {
-            Storage::delete($material->file_path);
-        }
-
-        $material->delete();
+        \Illuminate\Support\Facades\DB::transaction(function() use ($material) {
+            if (Storage::exists($material->file_path)) {
+                Storage::delete($material->file_path);
+            }
+            $material->delete();
+        });
 
         return redirect()->route('study_materials.index')->with('flash_success', __('Study material deleted successfully.'));
     }

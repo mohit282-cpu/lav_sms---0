@@ -197,16 +197,51 @@ class PaymentController extends Controller
             }
 
             $payment = $this->pay->find($pr->payment_id);
-            $d['amt_paid'] = $amt_p = $pr->amt_paid + $req->amt_paid;
-            $d['balance'] = $bal = max(0, $payment->amount - $amt_p);
-            $d['paid'] = $bal < 1 ? 1 : 0;
+            if(!$payment) {
+                return response()->json(['msg' => __('msg.rnf')], 404);
+            }
+
+            $payAmt = (float)$req->amt_paid;
+            if ($payAmt <= 0 || !is_finite($payAmt)) {
+                return response()->json(['msg' => __('Payment amount must be a positive number.')], 422);
+            }
+
+            // Round to 2 decimal places to match currency schema
+            $payAmt = round($payAmt, 2);
+
+            // Authoritative outstanding balance
+            $totalInvoiceAmount = (float)$payment->amount;
+            $currentPaid = (float)$pr->amt_paid;
+            $outstanding = max(0, round($totalInvoiceAmount - $currentPaid, 2));
+
+            if ($outstanding <= 0) {
+                if (!$pr->paid) {
+                    $this->pay->updateRecord($pr_id, ['paid' => 1, 'balance' => 0]);
+                }
+                return response()->json(['msg' => __('This invoice has already been fully paid.')], 422);
+            }
+
+            // Strict server-side rejection of overpayments
+            if ($payAmt > $outstanding) {
+                return response()->json([
+                    'msg' => __('Payment amount exceeds the outstanding balance of :amount', ['amount' => $outstanding])
+                ], 422);
+            }
+
+            $newAmtPaid = round($currentPaid + $payAmt, 2);
+            $newBalance = max(0, round($totalInvoiceAmount - $newAmtPaid, 2));
+            $isPaid = $newBalance <= 0.001 ? 1 : 0;
+
+            $d['amt_paid'] = $newAmtPaid;
+            $d['balance'] = $newBalance;
+            $d['paid'] = $isPaid;
 
             $this->pay->updateRecord($pr_id, $d);
 
-            $d2['amt_paid'] = $req->amt_paid;
-            $d2['balance'] = $bal;
+            $d2['amt_paid'] = $payAmt;
+            $d2['balance'] = $newBalance;
             $d2['pr_id'] = $pr_id;
-            $d2['year'] = $this->year;
+            $d2['year'] = $pr->year ?: $payment->year ?: $this->year;
 
             $this->pay->createReceipt($d2);
             return Qs::jsonUpdateOk();

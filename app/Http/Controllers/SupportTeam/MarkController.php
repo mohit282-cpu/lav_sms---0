@@ -47,12 +47,25 @@ class MarkController extends Controller
 
     public function year_selector($student_id)
     {
-       return $this->verifyStudentExamYear($student_id);
+        $st_id = $this->decodeStudentId($student_id);
+
+        /* Prevent Other Students/Parents from viewing Result of others */
+        if(Auth::user()->id != $st_id && !Qs::userIsTeamSAT() && !Qs::userIsMyChild($st_id, Auth::user()->id)){
+            return redirect(route('dashboard'))->with('pop_error', __('msg.denied'));
+        }
+
+       return $this->verifyStudentExamYear($st_id);
     }
 
     public function year_selected(Request $req, $student_id)
     {
         $st_id = $this->decodeStudentId($student_id);
+
+        /* Prevent Other Students/Parents from viewing Result of others */
+        if(Auth::user()->id != $st_id && !Qs::userIsTeamSAT() && !Qs::userIsMyChild($st_id, Auth::user()->id)){
+            return redirect(route('dashboard'))->with('pop_error', __('msg.denied'));
+        }
+
         if(!$this->verifyStudentExamYear($st_id, $req->year)){
             return $this->noStudentRecord();
         }
@@ -67,6 +80,19 @@ class MarkController extends Controller
         /* Prevent Other Students/Parents from viewing Result of others */
         if(Auth::user()->id != $st_id && !Qs::userIsTeamSAT() && !Qs::userIsMyChild($st_id, Auth::user()->id)){
             return redirect(route('dashboard'))->with('pop_error', __('msg.denied'));
+        }
+
+        /* If teacher, verify they teach this student's class or section */
+        if(Qs::userIsTeacher()){
+            $srCheck = $this->student->getRecord(['user_id' => $st_id])->first();
+            if(!$srCheck){
+                return $this->noStudentRecord();
+            }
+            $teachesClass = \App\Models\Subject::where('my_class_id', $srCheck->my_class_id)->where('teacher_id', Auth::id())->exists();
+            $teachesSection = \App\Models\Section::where('id', $srCheck->section_id)->where('teacher_id', Auth::id())->exists();
+            if(!$teachesClass && !$teachesSection){
+                return redirect(route('dashboard'))->with('pop_error', __('msg.denied'));
+            }
         }
 
         if(Mk::examIsLocked() && !Qs::userIsTeamSA()){
@@ -233,6 +259,21 @@ class MarkController extends Controller
 
     public function selector(MarkSelector $req)
     {
+        // Validate academic relationships
+        $sec = \App\Models\Section::where('id', $req->section_id)->where('my_class_id', $req->my_class_id)->first();
+        $sub = \App\Models\Subject::where('id', $req->subject_id)->where('my_class_id', $req->my_class_id)->first();
+
+        if(!$sec || !$sub){
+            return back()->with('pop_error', __('msg.rnf'));
+        }
+
+        // Teachers can only select marks for subjects assigned to them
+        if(Qs::userIsTeacher()){
+            if($sub->teacher_id != Auth::id()){
+                return back()->with('pop_error', __('msg.denied'));
+            }
+        }
+
         $data = $req->only(['exam_id', 'my_class_id', 'section_id', 'subject_id']);
         $d2 = $req->only(['exam_id', 'my_class_id', 'section_id']);
         $d = $req->only(['my_class_id', 'section_id']);
@@ -263,6 +304,21 @@ class MarkController extends Controller
 
     public function manage($exam_id, $class_id, $section_id, $subject_id)
     {
+        // Validate academic relationships
+        $sec = \App\Models\Section::where('id', $section_id)->where('my_class_id', $class_id)->first();
+        $sub = \App\Models\Subject::where('id', $subject_id)->where('my_class_id', $class_id)->first();
+
+        if(!$sec || !$sub){
+            return $this->noStudentRecord();
+        }
+
+        // Teachers can only manage subjects assigned to them
+        if(Qs::userIsTeacher()){
+            if($sub->teacher_id != Auth::id()){
+                abort(403, __('msg.denied'));
+            }
+        }
+
         $exam = $this->exam->find($exam_id);
         $examYear = $exam ? $exam->year : $this->year;
         $d = ['exam_id' => $exam_id, 'my_class_id' => $class_id, 'section_id' => $section_id, 'subject_id' => $subject_id, 'year' => $examYear];
@@ -287,10 +343,24 @@ class MarkController extends Controller
 
     public function update(Request $req, $exam_id, $class_id, $section_id, $subject_id)
     {
+        // Validate academic relationships
+        $sec = \App\Models\Section::where('id', $section_id)->where('my_class_id', $class_id)->first();
+        $subject = \App\Models\Subject::where('id', $subject_id)->where('my_class_id', $class_id)->first();
+
+        if(!$sec || !$subject){
+            return response()->json(['ok' => false, 'msg' => __('msg.rnf')], 404);
+        }
+
+        // Teachers can only update marks for subjects assigned to them
+        if(Qs::userIsTeacher()){
+            if($subject->teacher_id != Auth::id()){
+                return response()->json(['ok' => false, 'msg' => __('msg.denied')], 403);
+            }
+        }
+
         $exam = $this->exam->find($exam_id);
         $examYear = $exam ? $exam->year : $this->year;
         $p = ['exam_id' => $exam_id, 'my_class_id' => $class_id, 'section_id' => $section_id, 'subject_id' => $subject_id, 'year' => $examYear];
-        $subject = \App\Models\Subject::find($subject_id);
         $marks = $this->exam->getMark($p);
         $class_type = $this->my_class->findTypeByClass($class_id);
         $gradingService = app(\App\Services\NepalGradingService::class);
@@ -495,6 +565,18 @@ class MarkController extends Controller
 
     public function comment_update(Request $req, $exr_id)
     {
+        $exr = $this->exam->getRecord(['id' => $exr_id])->first();
+        if(!$exr){
+            return response()->json(['ok' => false, 'msg' => __('msg.rnf')], 404);
+        }
+
+        if(Qs::userIsTeacher()){
+            $isClassTeacher = \App\Models\Section::where('id', $exr->section_id)->where('teacher_id', Auth::id())->exists();
+            if(!$isClassTeacher){
+                return response()->json(['ok' => false, 'msg' => __('msg.denied')], 403);
+            }
+        }
+
         $d = Qs::userIsTeamSA() ? $req->only(['t_comment', 'p_comment']) : $req->only(['t_comment']);
 
         $this->exam->updateRecord(['id' => $exr_id], $d);
@@ -503,6 +585,18 @@ class MarkController extends Controller
 
     public function skills_update(Request $req, $skill, $exr_id)
     {
+        $exr = $this->exam->getRecord(['id' => $exr_id])->first();
+        if(!$exr){
+            return response()->json(['ok' => false, 'msg' => __('msg.rnf')], 404);
+        }
+
+        if(Qs::userIsTeacher()){
+            $isClassTeacher = \App\Models\Section::where('id', $exr->section_id)->where('teacher_id', Auth::id())->exists();
+            if(!$isClassTeacher){
+                return response()->json(['ok' => false, 'msg' => __('msg.denied')], 403);
+            }
+        }
+
         $d = [];
         if($skill == 'AF' || $skill == 'PS'){
             $sk = strtolower($skill);
@@ -519,6 +613,12 @@ class MarkController extends Controller
         $d['selected'] = false;
 
         if($class_id && $section_id){
+            if (Qs::userIsTeacher()) {
+                $isAssigned = \App\Models\Section::where('id', $section_id)->where('teacher_id', Auth::id())->where('my_class_id', $class_id)->exists();
+                if(!$isAssigned){
+                    return redirect()->route('marks.bulk')->with('flash_danger', __('msg.denied'));
+                }
+            }
             $d['sections'] = $this->my_class->getAllSections()->where('my_class_id', $class_id);
             $d['students'] = $st = $this->student->getRecord(['my_class_id' => $class_id, 'section_id' => $section_id])->get()->sortBy('user.name');
             if($st->count() < 1){
@@ -534,6 +634,12 @@ class MarkController extends Controller
 
     public function bulk_select(Request $req)
     {
+        if (Qs::userIsTeacher()) {
+            $isAssigned = \App\Models\Section::where('id', $req->section_id)->where('teacher_id', Auth::id())->where('my_class_id', $req->my_class_id)->exists();
+            if(!$isAssigned){
+                return redirect()->route('marks.bulk')->with('flash_danger', __('msg.denied'));
+            }
+        }
         return redirect()->route('marks.bulk', [$req->my_class_id, $req->section_id]);
     }
 

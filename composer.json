@@ -49,6 +49,9 @@
             "advisories": {
                 "block": false
             }
+        },
+        "allow-plugins": {
+            "php-http/discovery": true
         }
     },
     "minimum-stability": "dev",

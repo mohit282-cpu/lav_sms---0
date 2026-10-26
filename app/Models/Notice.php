@@ -57,6 +57,12 @@ class Notice extends Model
 
         $query->where('is_published', true);
 
+        // Filter expired notices for non-administrators
+        $query->where(function ($q) {
+            $q->whereNull('expiry_date')
+              ->orWhere('expiry_date', '>=', now()->toDateString());
+        });
+
         if ($user->user_type === 'teacher') {
             return $query->where(function ($q) {
                 $q->whereIn('role_visibility', ['all', 'teacher'])
@@ -87,15 +93,24 @@ class Notice extends Model
         }
 
         if ($user->user_type === 'parent') {
-            $childrenClassIds = StudentRecord::where('my_parent_id', $user->id)->pluck('my_class_id')->filter()->unique()->toArray();
+            $children = StudentRecord::where('my_parent_id', $user->id)->get();
+            if ($children->isEmpty()) {
+                return $query->whereRaw('0 = 1');
+            }
 
             return $query->where(function ($q) {
                 $q->whereIn('role_visibility', ['all', 'parent'])
                   ->orWhereNull('role_visibility');
-            })->where(function ($q) use ($childrenClassIds) {
+            })->where(function ($q) use ($children) {
                 $q->whereNull('my_class_id');
-                if (!empty($childrenClassIds)) {
-                    $q->orWhereIn('my_class_id', $childrenClassIds);
+                foreach ($children as $child) {
+                    $q->orWhere(function ($sub) use ($child) {
+                        $sub->where('my_class_id', $child->my_class_id)
+                            ->where(function ($s) use ($child) {
+                                $s->whereNull('section_id')
+                                  ->orWhere('section_id', $child->section_id);
+                            });
+                    });
                 }
             });
         }

@@ -59,17 +59,27 @@ class NoticeController extends Controller
             'is_published' => 'nullable|boolean',
         ]);
 
+        if ($request->filled('section_id')) {
+            if (!$request->filled('my_class_id')) {
+                return back()->withInput()->with('flash_danger', __('A class must be selected if a section is specified.'));
+            }
+            $sec = \App\Models\Section::where('id', $request->section_id)->where('my_class_id', $request->my_class_id)->first();
+            if (!$sec) {
+                return back()->withInput()->with('flash_danger', __('The selected section does not belong to the selected class.'));
+            }
+        }
+
         $data = $validated;
         $data['created_by'] = Auth::id();
         $data['role_visibility'] = $data['role_visibility'] ?? 'all';
         $data['is_published'] = $request->has('is_published') ? (bool)$request->is_published : true;
 
         if (!empty($data['notice_date_bs'])) {
-            try {
-                $data['notice_date'] = NepaliHelper::bsToAd($data['notice_date_bs']);
-            } catch (\Exception $e) {
-                return back()->withInput()->with('flash_danger', __('Invalid BS notice date format.'));
+            $adNotice = NepaliHelper::bsToAd($data['notice_date_bs']);
+            if (!$adNotice) {
+                return back()->withInput()->with('flash_danger', __('Invalid BS notice date format or out-of-range date.'));
             }
+            $data['notice_date'] = $adNotice;
         } elseif (empty($data['notice_date'])) {
             $data['notice_date'] = now()->toDateString();
             $data['notice_date_bs'] = NepaliHelper::adToBs($data['notice_date']);
@@ -78,13 +88,22 @@ class NoticeController extends Controller
         }
 
         if (!empty($data['expiry_date_bs'])) {
-            try {
-                $data['expiry_date'] = NepaliHelper::bsToAd($data['expiry_date_bs']);
-            } catch (\Exception $e) {
-                return back()->withInput()->with('flash_danger', __('Invalid BS expiry date format.'));
+            $adExpiry = NepaliHelper::bsToAd($data['expiry_date_bs']);
+            if (!$adExpiry) {
+                return back()->withInput()->with('flash_danger', __('Invalid BS expiry date format or out-of-range date.'));
             }
+            $data['expiry_date'] = $adExpiry;
         } elseif (!empty($data['expiry_date'])) {
             $data['expiry_date_bs'] = NepaliHelper::adToBs($data['expiry_date']);
+        } else {
+            $data['expiry_date'] = null;
+            $data['expiry_date_bs'] = null;
+        }
+
+        if (!empty($data['expiry_date']) && !empty($data['notice_date'])) {
+            if ($data['expiry_date'] < $data['notice_date']) {
+                return back()->withInput()->with('flash_danger', __('Expiry date cannot be earlier than notice date.'));
+            }
         }
 
         Notice::create($data);
@@ -125,31 +144,48 @@ class NoticeController extends Controller
             'is_published' => 'nullable|boolean',
         ]);
 
+        if ($request->filled('section_id')) {
+            $classId = $request->filled('my_class_id') ? $request->my_class_id : $notice->my_class_id;
+            if (!$classId) {
+                return back()->withInput()->with('flash_danger', __('A class must be selected if a section is specified.'));
+            }
+            $sec = \App\Models\Section::where('id', $request->section_id)->where('my_class_id', $classId)->first();
+            if (!$sec) {
+                return back()->withInput()->with('flash_danger', __('The selected section does not belong to the selected class.'));
+            }
+        }
+
         $data = $validated;
-        $data['role_visibility'] = $data['role_visibility'] ?? 'all';
-        $data['is_published'] = $request->has('is_published') ? (bool)$request->is_published : false;
+        $data['role_visibility'] = $data['role_visibility'] ?? $notice->role_visibility ?? 'all';
+        $data['is_published'] = $request->has('is_published') ? (bool)$request->is_published : $notice->is_published;
 
         if (!empty($data['notice_date_bs'])) {
-            try {
-                $data['notice_date'] = NepaliHelper::bsToAd($data['notice_date_bs']);
-            } catch (\Exception $e) {
-                return back()->withInput()->with('flash_danger', __('Invalid BS notice date format.'));
+            $adNotice = NepaliHelper::bsToAd($data['notice_date_bs']);
+            if (!$adNotice) {
+                return back()->withInput()->with('flash_danger', __('Invalid BS notice date format or out-of-range date.'));
             }
+            $data['notice_date'] = $adNotice;
         } elseif (!empty($data['notice_date'])) {
             $data['notice_date_bs'] = NepaliHelper::adToBs($data['notice_date']);
         }
 
         if (!empty($data['expiry_date_bs'])) {
-            try {
-                $data['expiry_date'] = NepaliHelper::bsToAd($data['expiry_date_bs']);
-            } catch (\Exception $e) {
-                return back()->withInput()->with('flash_danger', __('Invalid BS expiry date format.'));
+            $adExpiry = NepaliHelper::bsToAd($data['expiry_date_bs']);
+            if (!$adExpiry) {
+                return back()->withInput()->with('flash_danger', __('Invalid BS expiry date format or out-of-range date.'));
             }
+            $data['expiry_date'] = $adExpiry;
         } elseif (!empty($data['expiry_date'])) {
             $data['expiry_date_bs'] = NepaliHelper::adToBs($data['expiry_date']);
         } else {
             $data['expiry_date'] = null;
             $data['expiry_date_bs'] = null;
+        }
+
+        if (!empty($data['expiry_date']) && !empty($data['notice_date'])) {
+            if ($data['expiry_date'] < $data['notice_date']) {
+                return back()->withInput()->with('flash_danger', __('Expiry date cannot be earlier than notice date.'));
+            }
         }
 
         $notice->update($data);
