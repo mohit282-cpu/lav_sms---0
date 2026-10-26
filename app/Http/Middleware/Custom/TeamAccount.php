@@ -10,6 +10,7 @@ class TeamAccount
 {
     /**
      * Handle an incoming request.
+     * Enforce strict financial/accounting authorization with HTTP 403 on forbidden access.
      *
      * @param  \Illuminate\Http\Request  $request
      * @param  \Closure  $next
@@ -17,6 +18,17 @@ class TeamAccount
      */
     public function handle($request, Closure $next)
     {
-        return (Auth::check() && Qs::userIsTeamAccount()) ? $next($request) : redirect()->route('login');
+        if (!Auth::check()) {
+            return redirect()->route('login');
+        }
+
+        if (!Qs::userIsTeamAccount()) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json(['message' => __('msg.denied') ?: 'Unauthorized action.'], 403);
+            }
+            abort(403, __('msg.denied') ?: 'Unauthorized action. Accountant or Administrator privilege required.');
+        }
+
+        return $next($request);
     }
 }

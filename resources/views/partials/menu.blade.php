@@ -269,6 +269,20 @@
                     </li>
                 @endif
 
+                {{--Noticeboard--}}
+                <li class="nav-item">
+                    <a href="{{ route('notices.index') }}" class="nav-link {{ in_array(Route::currentRouteName(), ['notices.index', 'notices.show', 'notices.create', 'notices.edit']) ? 'active' : '' }}">
+                        <i class="icon-newspaper"></i> <span>{{ __('Noticeboard') }}</span>
+                    </a>
+                </li>
+
+                {{--Study Materials--}}
+                <li class="nav-item">
+                    <a href="{{ route('study_materials.index') }}" class="nav-link {{ Route::is('study_materials.index') ? 'active' : '' }}">
+                        <i class="icon-file-text2"></i> <span>{{ __('Study Materials') }}</span>
+                    </a>
+                </li>
+
                 @include('pages.'.Qs::getUserType().'.menu')
 
                 {{--Manage Account--}}

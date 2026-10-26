@@ -163,7 +163,7 @@ class UserController extends Controller
         $data['user'] = $this->user->find($user_id);
 
         /* Prevent Other Students from viewing Profile of others*/
-        if(Auth::user()->id != $user_id && !Qs::userIsTeamSAT() && !Qs::userIsMyChild(Auth::user()->id, $user_id)){
+        if(Auth::user()->id != $user_id && !Qs::userIsTeamSAT() && !Qs::userIsMyChild($user_id, Auth::user()->id)){
             return redirect(route('dashboard'))->with('pop_error', __('msg.denied'));
         }
 

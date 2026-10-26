@@ -38,9 +38,11 @@
                                     </a>
 
                                     <div class="dropdown-menu dropdown-menu-left">
-                                        <a href="{{ route('students.show', Qs::hash($s->id)) }}" class="dropdown-item"><i class="icon-eye"></i> View Profile</a>
-                                        <a target="_blank" href="{{ route('marks.year_selector', Qs::hash($s->user->id)) }}" class="dropdown-item"><i class="icon-check"></i> Marksheet</a>
-
+                                        <a href="{{ route('students.show', Qs::hash($s->id)) }}" class="dropdown-item"><i class="icon-eye"></i> {{ __('View Profile') }}</a>
+                                        <a target="_blank" href="{{ route('marks.year_selector', Qs::hash($s->user->id)) }}" class="dropdown-item"><i class="icon-check"></i> {{ __('Marksheet') }}</a>
+                                        <a href="{{ route('payments.invoice', [Qs::hash($s->user->id), Qs::getCurrentSession()]) }}" class="dropdown-item"><i class="icon-cash"></i> {{ __('Fees & Payments') }}</a>
+                                        <a href="{{ route('tt.student_timetable', Qs::hash($s->user->id)) }}" class="dropdown-item"><i class="icon-calendar"></i> {{ __('Timetable') }}</a>
+                                        <a href="{{ route('attendance.student_history', $s->user_id) }}" class="dropdown-item"><i class="icon-alarm"></i> {{ __('Attendance') }}</a>
                                     </div>
                                 </div>
                             </div>

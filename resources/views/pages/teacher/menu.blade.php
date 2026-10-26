@@ -1,3 +1,8 @@
+{{-- Teaching Timetable --}}
+<li class="nav-item">
+    <a href="{{ route('tt.my_timetable') }}" class="nav-link {{ Route::is('tt.my_timetable') ? 'active' : '' }}"><i class="icon-calendar"></i> <span>{{ __('My Teaching Timetable') }}</span></a>
+</li>
+
 {{-- Teacher Library Menu --}}
 <li class="nav-item">
     <a href="{{ route('books.index') }}" class="nav-link {{ Route::is('books.index') ? 'active' : '' }}"><i class="icon-books"></i> <span>{{ __('Library Catalogue') }}</span></a>

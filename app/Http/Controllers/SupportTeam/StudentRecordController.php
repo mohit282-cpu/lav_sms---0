@@ -54,6 +54,13 @@ class StudentRecordController extends Controller
        $data =  $req->only(Qs::getUserRecord());
        $sr =  $req->only(Qs::getStudentData());
 
+        if ($req->section_id && $req->my_class_id) {
+            $validSection = \App\Models\Section::where('id', $req->section_id)->where('my_class_id', $req->my_class_id)->exists();
+            if (!$validSection) {
+                return response()->json(['msg' => __('Selected section does not belong to the selected class.')], 422);
+            }
+        }
+
         $ct = $this->my_class->findTypeByClass($req->my_class_id)->code;
        /* $ct = ($ct == 'J') ? 'JSS' : $ct;
         $ct = ($ct == 'S') ? 'SS' : $ct;*/
@@ -176,10 +183,16 @@ class StudentRecordController extends Controller
 
         $srec = $req->only(Qs::getStudentData());
 
+        if (!empty($srec['section_id']) && !empty($srec['my_class_id'])) {
+            $validSection = \App\Models\Section::where('id', $srec['section_id'])->where('my_class_id', $srec['my_class_id'])->exists();
+            if (!$validSection) {
+                return response()->json(['msg' => __('Selected section does not belong to the selected class.')], 422);
+            }
+        }
+
         $this->student->updateRecord($sr_id, $srec); // Update St Rec
 
-        /*** If Class/Section is Changed in Same Year, Delete Marks/ExamRecord of Previous Class/Section ****/
-        Mk::deleteOldRecord($sr->user->id, $srec['my_class_id']);
+        // Preserve historical results across class/section transfers without destructive purge
 
         return Qs::jsonUpdateOk();
     }

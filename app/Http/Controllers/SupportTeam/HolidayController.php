@@ -15,7 +15,8 @@ class HolidayController extends Controller
 
     public function __construct(BikramSambatService $bsService)
     {
-        $this->middleware('teamSA');
+        $this->middleware('teamSA')->except(['events']);
+        $this->middleware('super_admin', ['only' => ['destroy']]);
         $this->bsService = $bsService;
     }
 
@@ -103,14 +104,36 @@ class HolidayController extends Controller
             $title = (app()->getLocale() === 'ne' && $h->title_ne) ? $h->title_ne : $h->title;
 
             $events[] = [
-                'id' => $h->id,
+                'id' => 'holiday_' . $h->id,
                 'title' => $title . " ({$h->start_date_bs} BS)",
                 'start' => $h->start_date->format('Y-m-d'),
                 // Fullcalendar end date is exclusive, add 1 day
                 'end' => $h->end_date->addDay()->format('Y-m-d'),
                 'color' => $color,
                 'description' => $h->description,
+                'type' => 'holiday',
             ];
+        }
+
+        $user = auth()->user();
+        if ($user) {
+            $notices = \App\Models\Notice::visibleTo($user)
+                ->where('is_published', true)
+                ->get();
+
+            foreach ($notices as $n) {
+                $endDate = $n->expiry_date ? $n->expiry_date->copy()->addDay()->format('Y-m-d') : $n->notice_date->copy()->addDay()->format('Y-m-d');
+                $events[] = [
+                    'id' => 'notice_' . $n->id,
+                    'title' => '[Notice] ' . $n->title . ($n->notice_date_bs ? " ({$n->notice_date_bs} BS)" : ''),
+                    'start' => $n->notice_date->format('Y-m-d'),
+                    'end' => $endDate,
+                    'color' => '#673ab7',
+                    'description' => $n->content,
+                    'type' => 'notice',
+                    'notice_id' => $n->id,
+                ];
+            }
         }
 
         return response()->json($events);

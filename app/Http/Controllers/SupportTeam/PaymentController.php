@@ -27,7 +27,8 @@ class PaymentController extends Controller
         $this->year = Qs::getCurrentSession();
         $this->student = $student;
 
-        $this->middleware('teamAccount');
+        $this->middleware('teamAccount')->except(['invoice', 'receipts', 'pdf_receipts']);
+        $this->middleware('super_admin', ['only' => ['destroy', 'reset_record']]);
     }
 
     public function index()
@@ -67,6 +68,18 @@ class PaymentController extends Controller
         $st_id = Qs::decodeHash($st_id) ?: $st_id;
         if(!$st_id) {return Qs::goWithDanger();}
 
+        if (!Qs::userIsTeamAccount()) {
+            if (Qs::userIsStudent() && \Illuminate\Support\Facades\Auth::id() != $st_id) {
+                abort(403);
+            }
+            if (Qs::userIsParent() && !Qs::userIsMyChild($st_id, \Illuminate\Support\Facades\Auth::id())) {
+                abort(403);
+            }
+            if (!Qs::userIsStudent() && !Qs::userIsParent()) {
+                abort(403);
+            }
+        }
+
         $d['sr'] = $sr = $this->student->findByUserId($st_id)->first();
         if(!$sr) {
             return Qs::goWithDanger('payments.manage');
@@ -88,12 +101,24 @@ class PaymentController extends Controller
 
         try {
              $d['pr'] = $pr = $this->pay->getRecord(['id' => $pr_id])->with('receipt')->first();
-        } catch (ModelNotFoundException $ex) {
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $ex) {
             return back()->with('flash_danger', __('msg.rnf'));
         }
 
         if(!$pr) {
             return back()->with('flash_danger', __('msg.rnf'));
+        }
+
+        if (!Qs::userIsTeamAccount()) {
+            if (Qs::userIsStudent() && \Illuminate\Support\Facades\Auth::id() != $pr->student_id) {
+                abort(403);
+            }
+            if (Qs::userIsParent() && !Qs::userIsMyChild($pr->student_id, \Illuminate\Support\Facades\Auth::id())) {
+                abort(403);
+            }
+            if (!Qs::userIsStudent() && !Qs::userIsParent()) {
+                abort(403);
+            }
         }
 
         $d['receipts'] = $pr->receipt;
@@ -113,12 +138,24 @@ class PaymentController extends Controller
 
         try {
             $d['pr'] = $pr = $this->pay->getRecord(['id' => $pr_id])->with('receipt')->first();
-        } catch (ModelNotFoundException $ex) {
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $ex) {
             return back()->with('flash_danger', __('msg.rnf'));
         }
 
         if(!$pr) {
             return back()->with('flash_danger', __('msg.rnf'));
+        }
+
+        if (!Qs::userIsTeamAccount()) {
+            if (Qs::userIsStudent() && \Illuminate\Support\Facades\Auth::id() != $pr->student_id) {
+                abort(403);
+            }
+            if (Qs::userIsParent() && !Qs::userIsMyChild($pr->student_id, \Illuminate\Support\Facades\Auth::id())) {
+                abort(403);
+            }
+            if (!Qs::userIsStudent() && !Qs::userIsParent()) {
+                abort(403);
+            }
         }
 
         $d['receipts'] = $pr->receipt;
@@ -131,8 +168,6 @@ class PaymentController extends Controller
         $pdf_name = 'Receipt_'.$pr->ref_no;
 
         return PDF::loadView('pages.support_team.payments.receipt', $d)->download($pdf_name);
-
-        //return $this->downloadReceipt('pages.support_team.payments.receipt', $d, $pdf_name);
     }
 
     protected function downloadReceipt($page, $data, $name = NULL){
@@ -146,28 +181,36 @@ class PaymentController extends Controller
     public function pay_now(Request $req, $pr_id)
     {
         $this->validate($req, [
-            'amt_paid' => 'required|numeric'
+            'amt_paid' => 'required|numeric|gt:0'
         ], [], ['amt_paid' => 'Amount Paid']);
 
         $pr_id = Qs::decodeHash($pr_id) ?: $pr_id;
-        $pr = $this->pay->findRecord($pr_id);
-        if(!$pr) {
-            return response()->json(['msg' => __('msg.rnf')], 404);
-        }
-        $payment = $this->pay->find($pr->payment_id);
-        $d['amt_paid'] = $amt_p = $pr->amt_paid + $req->amt_paid;
-        $d['balance'] = $bal = $payment->amount - $amt_p;
-        $d['paid'] = $bal < 1 ? 1 : 0;
 
-        $this->pay->updateRecord($pr_id, $d);
+        return \Illuminate\Support\Facades\DB::transaction(function() use ($req, $pr_id) {
+            $pr = \App\Models\PaymentRecord::where('id', $pr_id)->lockForUpdate()->first();
+            if(!$pr) {
+                return response()->json(['msg' => __('msg.rnf')], 404);
+            }
 
-        $d2['amt_paid'] = $req->amt_paid;
-        $d2['balance'] = $bal;
-        $d2['pr_id'] = $pr_id;
-        $d2['year'] = $this->year;
+            if ($pr->paid) {
+                return response()->json(['msg' => __('This invoice has already been fully paid.')], 422);
+            }
 
-        $this->pay->createReceipt($d2);
-        return Qs::jsonUpdateOk();
+            $payment = $this->pay->find($pr->payment_id);
+            $d['amt_paid'] = $amt_p = $pr->amt_paid + $req->amt_paid;
+            $d['balance'] = $bal = max(0, $payment->amount - $amt_p);
+            $d['paid'] = $bal < 1 ? 1 : 0;
+
+            $this->pay->updateRecord($pr_id, $d);
+
+            $d2['amt_paid'] = $req->amt_paid;
+            $d2['balance'] = $bal;
+            $d2['pr_id'] = $pr_id;
+            $d2['year'] = $this->year;
+
+            $this->pay->createReceipt($d2);
+            return Qs::jsonUpdateOk();
+        });
     }
 
     public function manage($class_id = NULL)
@@ -243,7 +286,17 @@ class PaymentController extends Controller
 
     public function destroy($id)
     {
-        $this->pay->find($id)->delete();
+        $payment = $this->pay->find($id);
+        if (!$payment) {
+            return Qs::goWithDanger('payments.index');
+        }
+
+        $hasPaidRecords = \App\Models\PaymentRecord::where('payment_id', $id)->where('amt_paid', '>', 0)->exists();
+        if ($hasPaidRecords) {
+            return back()->with('flash_danger', __('Cannot delete fee structure with existing payments or receipts.'));
+        }
+
+        $payment->delete();
 
         return Qs::deleteOk('payments.index');
     }
@@ -251,10 +304,22 @@ class PaymentController extends Controller
     public function reset_record($id)
     {
         $id = Qs::decodeHash($id) ?: $id;
-        $pr['amt_paid'] = $pr['paid'] = $pr['balance'] = 0;
-        $this->pay->updateRecord($id, $pr);
-        $this->pay->deleteReceipts(['pr_id' => $id]);
 
-        return back()->with('flash_success', __('msg.update_ok'));
+        return \Illuminate\Support\Facades\DB::transaction(function() use ($id) {
+            $pr = $this->pay->findRecord($id);
+            if (!$pr) {
+                return back()->with('flash_danger', __('msg.rnf'));
+            }
+
+            $payment = $this->pay->find($pr->payment_id);
+            $data['amt_paid'] = 0;
+            $data['paid'] = 0;
+            $data['balance'] = $payment ? $payment->amount : 0;
+
+            $this->pay->updateRecord($id, $data);
+            $this->pay->deleteReceipts(['pr_id' => $id]);
+
+            return back()->with('flash_success', __('msg.update_ok'));
+        });
     }
 }

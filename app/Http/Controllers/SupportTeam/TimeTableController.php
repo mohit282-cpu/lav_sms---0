@@ -23,6 +23,71 @@ class TimeTableController extends Controller
         $this->my_class = $mc;
         $this->exam = $exam;
         $this->year = Qs::getCurrentSession();
+
+        $this->middleware('super_admin', ['only' => ['delete', 'delete_record']]);
+    }
+
+    public function my_timetable()
+    {
+        $user = auth()->user();
+
+        if (Qs::userIsStudent()) {
+            $sr = \App\Models\StudentRecord::where('user_id', $user->id)->first();
+            if (!$sr) {
+                return back()->with('flash_danger', __('Student record not found.'));
+            }
+            $ttr = \App\Models\TimeTableRecord::where('my_class_id', $sr->my_class_id)->whereNull('exam_id')->first()
+                ?? \App\Models\TimeTableRecord::where('my_class_id', $sr->my_class_id)->first();
+
+            if (!$ttr) {
+                return view('pages.support_team.timetables.my_timetable', ['empty' => true]);
+            }
+            return redirect()->route('ttr.show', $ttr->id);
+        }
+
+        if (Qs::userIsTeacher()) {
+            $subjectIds = \App\Models\Subject::where('teacher_id', $user->id)->pluck('id');
+            $tts = \App\Models\TimeTable::whereIn('subject_id', $subjectIds)
+                ->with(['subject', 'time_slot', 'tt_record.my_class'])
+                ->get();
+
+            return view('pages.support_team.timetables.teacher_timetable', compact('tts', 'user'));
+        }
+
+        if (Qs::userIsParent()) {
+            $children = \App\Models\StudentRecord::where('my_parent_id', $user->id)->with(['user', 'my_class'])->get();
+            return view('pages.support_team.timetables.parent_children_timetable', compact('children'));
+        }
+
+        return redirect()->route('tt.index');
+    }
+
+    public function student_timetable($student_id)
+    {
+        $student_id = Qs::decodeHash($student_id) ?: $student_id;
+        $user = auth()->user();
+
+        if (Qs::userIsStudent() && $user->id != $student_id) {
+            abort(403);
+        }
+
+        if (Qs::userIsParent() && !Qs::userIsMyChild($student_id, $user->id)) {
+            abort(403);
+        }
+
+        $sr = \App\Models\StudentRecord::where('user_id', $student_id)->first();
+        if (!$sr) {
+            return back()->with('flash_danger', __('Student record not found.'));
+        }
+
+        $ttr = \App\Models\TimeTableRecord::where('my_class_id', $sr->my_class_id)->whereNull('exam_id')->first()
+            ?? \App\Models\TimeTableRecord::where('my_class_id', $sr->my_class_id)->first();
+
+        if (!$ttr) {
+            return view('pages.support_team.timetables.my_timetable', ['empty' => true]);
+        }
+
+        return redirect()->route('ttr.show', $ttr->id);
     }
 
     public function index()
@@ -38,6 +103,21 @@ class TimeTableController extends Controller
     {
         $d['ttr_id'] = $ttr_id;
         $d['ttr'] = $ttr = $this->tt->findRecord($ttr_id);
+        if (!$ttr) {
+            return Qs::goWithDanger('tt.index');
+        }
+
+        if (!Qs::userIsTeamSA()) {
+            if (Qs::userIsTeacher()) {
+                $isClassTeacher = \App\Models\Section::where('my_class_id', $ttr->my_class_id)->where('teacher_id', auth()->id())->exists();
+                if (!$isClassTeacher) {
+                    abort(403, __('Only assigned class teachers can manage class timetable.'));
+                }
+            } else {
+                abort(403);
+            }
+        }
+
         $d['time_slots'] = $this->tt->getTimeSlotByTTR($ttr_id);
         $d['ts_existing'] = $this->tt->getExistingTS($ttr_id);
         $d['subjects'] = $this->my_class->getSubject(['my_class_id' => $ttr->my_class_id])->get();
@@ -56,8 +136,57 @@ class TimeTableController extends Controller
     public function store(TTRequest $req)
     {
         $data = $req->all();
+        $ttr = $this->tt->findRecord($req->ttr_id);
+        if (!$ttr) {
+            return response()->json(['msg' => __('Record not found.'), 'ok' => false], 404);
+        }
+
+        if (!Qs::userIsTeamSA()) {
+            if (Qs::userIsTeacher()) {
+                $isClassTeacher = \App\Models\Section::where('my_class_id', $ttr->my_class_id)->where('teacher_id', auth()->id())->exists();
+                if (!$isClassTeacher) {
+                    return response()->json(['msg' => __('Only assigned class teachers can manage class timetable.'), 'ok' => false], 403);
+                }
+            } else {
+                return response()->json(['msg' => __('Unauthorized.'), 'ok' => false], 403);
+            }
+        }
+
         $tms = $this->tt->findTimeSlot($req->ts_id);
         $d_date = $req->exam_date ?? $req->day;
+        $day_col = $req->exam_date ? 'exam_date' : 'day';
+
+        // Conflict check 1: Class already has a subject scheduled in this slot
+        $classConflict = \App\Models\TimeTable::where('ttr_id', $req->ttr_id)
+            ->where('ts_id', $req->ts_id)
+            ->where($day_col, $d_date)
+            ->exists();
+        if ($classConflict) {
+            return response()->json(['msg' => __('This class already has a subject scheduled for this time slot.'), 'ok' => false], 422);
+        }
+
+        // Conflict check 2: Teacher scheduling conflict across all classes
+        $subject = \App\Models\Subject::find($req->subject_id);
+        if ($subject && $subject->teacher_id) {
+            $teacherId = $subject->teacher_id;
+            $teacherConflict = \App\Models\TimeTable::where($day_col, $d_date)
+                ->whereHas('subject', function($q) use ($teacherId) {
+                    $q->where('teacher_id', $teacherId);
+                })
+                ->where(function($q) use ($req, $tms) {
+                    $q->where('ts_id', $req->ts_id)
+                      ->orWhere(function($sub) use ($tms) {
+                          $sub->where('timestamp_from', '<', $tms->timestamp_to)
+                              ->where('timestamp_to', '>', $tms->timestamp_from);
+                      });
+                })
+                ->exists();
+
+            if ($teacherConflict) {
+                return response()->json(['msg' => __('Teacher scheduling conflict: The assigned teacher is already scheduled in another class during this time period.'), 'ok' => false], 422);
+            }
+        }
+
         $data['timestamp_from'] = strtotime($d_date.' '.$tms->time_from);
         $data['timestamp_to'] = strtotime($d_date.' '.$tms->time_to);
 
@@ -69,15 +198,65 @@ class TimeTableController extends Controller
     public function update(TTRequest $req, $tt_id)
     {
         $data = $req->all();
+        $ttr = $this->tt->findRecord($req->ttr_id);
+        if (!$ttr) {
+            return back()->with('flash_danger', __('Record not found.'));
+        }
+
+        if (!Qs::userIsTeamSA()) {
+            if (Qs::userIsTeacher()) {
+                $isClassTeacher = \App\Models\Section::where('my_class_id', $ttr->my_class_id)->where('teacher_id', auth()->id())->exists();
+                if (!$isClassTeacher) {
+                    return back()->with('flash_danger', __('Only assigned class teachers can manage class timetable.'));
+                }
+            } else {
+                abort(403);
+            }
+        }
+
         $tms = $this->tt->findTimeSlot($req->ts_id);
         $d_date = $req->exam_date ?? $req->day;
+        $day_col = $req->exam_date ? 'exam_date' : 'day';
+
+        // Conflict check 1: Class conflict
+        $classConflict = \App\Models\TimeTable::where('ttr_id', $req->ttr_id)
+            ->where('ts_id', $req->ts_id)
+            ->where($day_col, $d_date)
+            ->where('id', '!=', $tt_id)
+            ->exists();
+        if ($classConflict) {
+            return back()->with('flash_danger', __('This class already has a subject scheduled for this time slot.'));
+        }
+
+        // Conflict check 2: Teacher conflict
+        $subject = \App\Models\Subject::find($req->subject_id);
+        if ($subject && $subject->teacher_id) {
+            $teacherId = $subject->teacher_id;
+            $teacherConflict = \App\Models\TimeTable::where($day_col, $d_date)
+                ->where('id', '!=', $tt_id)
+                ->whereHas('subject', function($q) use ($teacherId) {
+                    $q->where('teacher_id', $teacherId);
+                })
+                ->where(function($q) use ($req, $tms) {
+                    $q->where('ts_id', $req->ts_id)
+                      ->orWhere(function($sub) use ($tms) {
+                          $sub->where('timestamp_from', '<', $tms->timestamp_to)
+                              ->where('timestamp_to', '>', $tms->timestamp_from);
+                      });
+                })
+                ->exists();
+
+            if ($teacherConflict) {
+                return back()->with('flash_danger', __('Teacher scheduling conflict: The assigned teacher is already scheduled in another class during this time period.'));
+            }
+        }
+
         $data['timestamp_from'] = strtotime($d_date.' '.$tms->time_from);
         $data['timestamp_to'] = strtotime($d_date.' '.$tms->time_to);
 
         $this->tt->update($tt_id, $data);
 
         return back()->with('flash_success', __('msg.update_ok'));
-
     }
 
     public function delete($tt_id)

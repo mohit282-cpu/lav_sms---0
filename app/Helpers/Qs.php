@@ -145,6 +145,11 @@ class Qs
         return Auth::check() && Auth::user()->user_type == 'librarian';
     }
 
+    public static function userIsAccountant()
+    {
+        return Auth::check() && Auth::user()->user_type == 'accountant';
+    }
+
     public static function userIsAcademic()
     {
         return in_array(Auth::user()->user_type, self::getTeamAcademic());

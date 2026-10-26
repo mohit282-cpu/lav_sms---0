@@ -59,18 +59,22 @@ Route::group(['middleware' => ['auth', 'no_store']], function () {
         /*************** TimeTables *****************/
         Route::group(['prefix' => 'timetables'], function(){
             Route::get('/', 'TimeTableController@index')->name('tt.index');
+            Route::get('my_timetable', 'TimeTableController@my_timetable')->name('tt.my_timetable');
+            Route::get('student/{student_id}', 'TimeTableController@student_timetable')->name('tt.student_timetable');
 
-            Route::group(['middleware' => 'teamSA'], function() {
+            Route::group(['middleware' => 'teamSAT'], function() {
                 Route::post('/', 'TimeTableController@store')->name('tt.store');
                 Route::put('/{tt}', 'TimeTableController@update')->name('tt.update');
-                Route::delete('/{tt}', 'TimeTableController@delete')->name('tt.delete');
             });
+            Route::delete('/{tt}', 'TimeTableController@delete')->name('tt.delete')->middleware('super_admin');
 
             /*************** TimeTable Records *****************/
             Route::group(['prefix' => 'records'], function(){
 
-                Route::group(['middleware' => 'teamSA'], function(){
+                Route::group(['middleware' => 'teamSAT'], function(){
                     Route::get('manage/{ttr}', 'TimeTableController@manage')->name('ttr.manage');
+                });
+                Route::group(['middleware' => 'teamSA'], function(){
                     Route::post('/', 'TimeTableController@store_record')->name('ttr.store');
                     Route::get('edit/{ttr}', 'TimeTableController@edit_record')->name('ttr.edit');
                     Route::put('/{ttr}', 'TimeTableController@update_record')->name('ttr.update');
@@ -78,7 +82,7 @@ Route::group(['middleware' => ['auth', 'no_store']], function () {
 
                 Route::get('show/{ttr}', 'TimeTableController@show_record')->name('ttr.show');
                 Route::get('print/{ttr}', 'TimeTableController@print_record')->name('ttr.print');
-                Route::delete('/{ttr}', 'TimeTableController@delete_record')->name('ttr.destroy');
+                Route::delete('/{ttr}', 'TimeTableController@delete_record')->name('ttr.destroy')->middleware('super_admin');
 
             });
 
@@ -144,6 +148,7 @@ Route::group(['middleware' => ['auth', 'no_store']], function () {
             Route::post('select_year/{id}', 'MarkController@year_selected')->name('marks.year_select');
             Route::get('show/{id}/{year}', 'MarkController@show')->name('marks.show')->where('year', '.*');
             Route::get('print/{id}/{exam_id}/{year}', 'MarkController@print_view')->name('marks.print')->where('year', '.*');
+            Route::get('pdf/{id}/{exam_id}/{year}', 'MarkController@pdf_download')->name('marks.pdf')->where('year', '.*');
 
         });
 
@@ -159,6 +164,11 @@ Route::group(['middleware' => ['auth', 'no_store']], function () {
         Route::resource('dorms', 'DormController');
         Route::resource('payments', 'PaymentController', ['except' => ['show']]);
         Route::get('payments/{year}', 'PaymentController@show')->name('payments.show')->where('year', '.*');
+
+        /*************** Notices & Study Materials *****************/
+        Route::resource('notices', 'NoticeController');
+        Route::resource('study_materials', 'StudyMaterialController', ['except' => ['show', 'edit', 'update', 'create']]);
+        Route::get('study_materials/download/{id}', 'StudyMaterialController@download')->name('study_materials.download');
 
         /*************** Academic Years & Holidays (Nepal BS) *****************/
         Route::resource('academic_years', 'AcademicYearController');

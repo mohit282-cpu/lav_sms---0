@@ -10,6 +10,7 @@ class SuperAdmin
 {
     /**
      * Handle an incoming request.
+     * Enforce strict Super Admin authorization with HTTP 403 on forbidden access.
      *
      * @param  \Illuminate\Http\Request  $request
      * @param  \Closure  $next
@@ -17,6 +18,17 @@ class SuperAdmin
      */
     public function handle($request, Closure $next)
     {
-        return (Auth::check() && Qs::userIsSuperAdmin()) ? $next($request) : redirect()->route('login');
+        if (!Auth::check()) {
+            return redirect()->route('login');
+        }
+
+        if (!Qs::userIsSuperAdmin()) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json(['message' => __('msg.denied') ?: 'Unauthorized action. Super Admin required.'], 403);
+            }
+            abort(403, __('msg.denied') ?: 'Unauthorized action. Super Admin privilege required.');
+        }
+
+        return $next($request);
     }
 }

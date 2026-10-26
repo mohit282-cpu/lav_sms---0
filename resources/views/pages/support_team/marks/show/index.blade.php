@@ -22,9 +22,10 @@
                         {{--Sheet Table--}}
                         @include('pages.support_team.marks.show.sheet')
 
-                        {{--Print Button--}}
+                        {{--Print & Download PDF Buttons--}}
                         <div class="text-center mt-3">
-                            <a target="_blank" href="{{ route('marks.print', [Qs::hash($student_id), $ex->id, $year]) }}" class="btn btn-secondary btn-lg">Print Marksheet <i class="icon-printer ml-2"></i></a>
+                            <a target="_blank" href="{{ route('marks.print', [Qs::hash($student_id), $ex->id, $year]) }}" class="btn btn-secondary btn-lg mr-2"><i class="icon-printer mr-2"></i>{{ __('Print Marksheet') }}</a>
+                            <a href="{{ route('marks.pdf', [Qs::hash($student_id), $ex->id, $year]) }}" class="btn btn-danger btn-lg"><i class="icon-file-pdf mr-2"></i>{{ __('Download PDF') }}</a>
                         </div>
 
                     </div>

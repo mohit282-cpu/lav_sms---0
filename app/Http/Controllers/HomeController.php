@@ -37,9 +37,35 @@ class HomeController extends Controller
 
     public function dashboard()
     {
-        $d=[];
-        if(Qs::userIsTeamSAT()){
+        $d = [];
+        $user = auth()->user();
+
+        if (Qs::userIsTeamSA()) {
             $d['users'] = $this->user->getAll();
+            $d['total_classes'] = \App\Models\MyClass::count();
+            $d['total_sections'] = \App\Models\Section::count();
+        } elseif (Qs::userIsTeacher()) {
+            $d['my_sections'] = \App\Models\Section::where('teacher_id', $user->id)->with('my_class')->get();
+            $d['my_subjects'] = \App\Models\Subject::where('teacher_id', $user->id)->with('my_class')->get();
+            $d['my_materials_count'] = \App\Models\StudyMaterial::where('teacher_id', $user->id)->count();
+        } elseif (Qs::userIsAccountant()) {
+            $session = Qs::getCurrentSession();
+            $d['total_payments'] = \App\Models\Payment::where('year', $session)->count();
+            $d['total_receipts_amount'] = \App\Models\Receipt::where('year', $session)->sum('amt_paid');
+            $d['cleared_records'] = \App\Models\PaymentRecord::where(['year' => $session, 'paid' => 1])->count();
+            $d['uncleared_records'] = \App\Models\PaymentRecord::where(['year' => $session, 'paid' => 0])->count();
+        } elseif (Qs::userIsLibrarian()) {
+            $d['total_books'] = \App\Models\Book::count();
+            $d['issued_books'] = \App\Models\BookRequest::where('returned', 0)->count();
+            $d['pending_requests'] = \App\Models\BookRequest::where('status', 'pending')->count();
+            $d['total_categories'] = \App\Models\BookCategory::count();
+        } elseif (Qs::userIsStudent()) {
+            $d['student_record'] = \App\Models\StudentRecord::where('user_id', $user->id)->with(['my_class', 'section'])->first();
+            $d['my_payments'] = \App\Models\PaymentRecord::where('student_id', $user->id)->get();
+            $d['my_books'] = \App\Models\BookRequest::where('user_id', $user->id)->where('returned', 0)->with('book')->get();
+            $d['my_materials_count'] = \App\Models\StudyMaterial::visibleTo($user)->count();
+        } elseif (Qs::userIsParent()) {
+            $d['children'] = \App\Models\StudentRecord::where('my_parent_id', $user->id)->with(['user', 'my_class', 'section'])->get();
         }
 
         return view('pages.support_team.dashboard', $d);

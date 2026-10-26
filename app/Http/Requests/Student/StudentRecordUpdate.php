@@ -56,7 +56,7 @@ class StudentRecordUpdate extends FormRequest
     {
         $input = $this->all();
 
-        $input['my_parent_id'] = $input['my_parent_id'] ? Qs::decodeHash($input['my_parent_id']) : NULL;
+        $input['my_parent_id'] = !empty($input['my_parent_id']) ? Qs::decodeHash($input['my_parent_id']) : NULL;
 
         $this->getInputSource()->replace($input);
 
