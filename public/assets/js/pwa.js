@@ -455,6 +455,22 @@
                             }
                             return data;
                         });
+                    }).catch(function (fetchErr) {
+                        // If browser unsubscription succeeded but server endpoint request failed (e.g. offline/network error),
+                        // record pending unsubscription endpoint for safe background reconciliation.
+                        try {
+                            var raw = localStorage.getItem('lav_sms_pending_unsub');
+                            var list = raw ? JSON.parse(raw) : [];
+                            var exists = false;
+                            for (var k = 0; k < list.length; k++) {
+                                if (list[k].endpoint === endpoint) { exists = true; break; }
+                            }
+                            if (!exists) {
+                                list.push({ endpoint: endpoint, time: Date.now() });
+                                localStorage.setItem('lav_sms_pending_unsub', JSON.stringify(list));
+                            }
+                        } catch (e) {}
+                        return { status: 'queued', message: 'Unsubscribed locally. Server sync queued.' };
                     });
                 });
             });
@@ -483,6 +499,46 @@
                     return data;
                 });
             });
+        },
+        reconcilePendingUnsubscribes: function () {
+            try {
+                var raw = localStorage.getItem('lav_sms_pending_unsub');
+                if (!raw) return Promise.resolve();
+                var list = JSON.parse(raw);
+                if (!Array.isArray(list) || list.length === 0) return Promise.resolve();
+
+                var csrf = document.querySelector('meta[name="csrf-token"]') ?
+                    document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
+
+                var remaining = [];
+                var promises = list.map(function (item) {
+                    return fetch(window.PWA_PUSH_UNSUBSCRIBE_URL || './pwa/push/unsubscribe', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrf,
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({ endpoint: item.endpoint })
+                    }).then(function (res) {
+                        if (!res.ok && res.status >= 500) {
+                            remaining.push(item);
+                        }
+                    }).catch(function () {
+                        remaining.push(item);
+                    });
+                });
+
+                return Promise.all(promises).then(function () {
+                    if (remaining.length > 0) {
+                        localStorage.setItem('lav_sms_pending_unsub', JSON.stringify(remaining));
+                    } else {
+                        localStorage.removeItem('lav_sms_pending_unsub');
+                    }
+                });
+            } catch (e) {
+                return Promise.resolve();
+            }
         }
     };
 
@@ -491,6 +547,10 @@
      */
     window.PwaPushUI = {
         init: function () {
+            if (window.PwaPush && window.PwaPush.reconcilePendingUnsubscribes) {
+                window.PwaPush.reconcilePendingUnsubscribes();
+            }
+
             var card = document.getElementById('pwa-push-card');
             if (!card) return;
 
@@ -1266,6 +1326,13 @@
 
     // Export state machine for testing and monitoring
     window.PwaUpdateStateMachine = PwaUpdateStateMachine;
+
+    // Background reconciliation when connectivity is restored
+    window.addEventListener('online', function () {
+        if (window.PwaPush && window.PwaPush.reconcilePendingUnsubscribes) {
+            window.PwaPush.reconcilePendingUnsubscribes();
+        }
+    });
 
     // Initialize on DOM load
     if (document.readyState === 'loading') {

@@ -17,6 +17,7 @@ class GenerateVapidKeys extends Command
      */
     protected $signature = 'pwa:vapid
                             {--show : Display the currently configured VAPID public key and subject}
+                            {--show-secret : Explicitly display the generated private key in terminal output}
                             {--save : Automatically update the .env file with generated keys}';
 
     /**
@@ -60,17 +61,28 @@ class GenerateVapidKeys extends Command
         $defaultSubject = 'mailto:' . (config('mail.from.address') ?: 'admin@' . (parse_url(config('app.url'), PHP_URL_HOST) ?: 'localhost'));
 
         $this->info('=== Generated Web Push VAPID Keypair ===');
-        $this->warn('SECURITY WARNING: The VAPID private key is a sensitive secret. Never commit it to Git, share it publicly, or expose it in client-side code.');
+        $this->warn('SECURITY NOTICE: The VAPID private key is a sensitive secret. Never commit it to Git or expose it in client-side code.');
         $this->line('<comment>VAPID_PUBLIC_KEY=</comment>' . $publicKey);
-        $this->line('<comment>VAPID_PRIVATE_KEY=</comment>' . $privateKey);
+
+        if ($this->option('show-secret')) {
+            $this->line('<comment>VAPID_PRIVATE_KEY=</comment>' . $privateKey);
+        } else {
+            $this->line('<comment>VAPID_PRIVATE_KEY=</comment>[HIDDEN] (Use --show-secret to print secret to terminal)');
+        }
+
         $this->line('<comment>VAPID_SUBJECT=</comment>' . $defaultSubject);
         $this->newLine();
 
         if ($this->option('save')) {
             $envPath = base_path('.env');
             if (!file_exists($envPath)) {
-                $this->warn('.env file not found. Please create it and add the keys manually.');
-                return 0;
+                $this->error('.env file not found. Please create it first.');
+                return 1;
+            }
+
+            if (!is_writable($envPath)) {
+                $this->error('.env file is not writable.');
+                return 1;
             }
 
             $envContent = file_get_contents($envPath);
@@ -83,9 +95,15 @@ class GenerateVapidKeys extends Command
             }
 
             file_put_contents($envPath, $envContent);
-            $this->info('✓ VAPID keys saved to .env file successfully.');
+
+            // Restrict permissions on platforms that support POSIX permissions
+            if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN' && function_exists('chmod')) {
+                @chmod($envPath, 0600);
+            }
+
+            $this->info('✓ VAPID keys securely saved to .env file without echoing private key material.');
         } else {
-            $this->comment('To save these keys to your .env file, run: php artisan pwa:vapid --save');
+            $this->comment('To save these keys to your .env file securely, run: php artisan pwa:vapid --save');
         }
 
         return 0;

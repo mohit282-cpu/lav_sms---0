@@ -42,41 +42,49 @@ class PushSubscription extends Model
 
     /**
      * Helper to store or update subscription by hash of endpoint safely.
-     * Prevents orphan records and safely reassigns ownership if a shared device changes authenticated users.
+     * Prevents orphan records, eliminates race conditions with database transactions,
+     * and safely reassigns ownership if a shared device changes authenticated users.
      */
     public static function storeSubscription(int $userId, array $data): self
     {
         $endpoint = $data['endpoint'];
         $hash = hash('sha256', $endpoint);
 
-        $existing = self::where('endpoint_hash', $hash)->first();
-        if ($existing) {
-            if ($existing->user_id !== $userId) {
-                \Illuminate\Support\Facades\Log::info('Push subscription endpoint ownership updated for reused device.', [
-                    'previous_user_id' => $existing->user_id,
-                    'new_user_id' => $userId,
-                    'endpoint_hash_prefix' => substr($hash, 0, 8),
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($userId, $endpoint, $hash, $data) {
+            $sub = self::where('endpoint_hash', $hash)->lockForUpdate()->first();
+
+            $pubKey = $data['keys']['p256dh'] ?? $data['public_key'] ?? null;
+            $authToken = $data['keys']['auth'] ?? $data['auth_token'] ?? null;
+            $contentEncoding = $data['content_encoding'] ?? 'aesgcm';
+
+            if ($sub) {
+                if ($sub->user_id !== $userId) {
+                    \Illuminate\Support\Facades\Log::info('Push subscription endpoint ownership updated for reused device.', [
+                        'previous_user_id' => $sub->user_id,
+                        'new_user_id' => $userId,
+                        'endpoint_hash_prefix' => substr($hash, 0, 8),
+                    ]);
+                }
+
+                $sub->update([
+                    'user_id' => $userId,
+                    'endpoint' => $endpoint,
+                    'public_key' => $pubKey ?: $sub->public_key,
+                    'auth_token' => $authToken ?: $sub->auth_token,
+                    'content_encoding' => $contentEncoding ?: $sub->content_encoding,
                 ]);
+
+                return $sub;
             }
 
-            $existing->update([
+            return self::create([
+                'endpoint_hash' => $hash,
                 'user_id' => $userId,
                 'endpoint' => $endpoint,
-                'public_key' => $data['keys']['p256dh'] ?? $data['public_key'] ?? $existing->public_key,
-                'auth_token' => $data['keys']['auth'] ?? $data['auth_token'] ?? $existing->auth_token,
-                'content_encoding' => $data['content_encoding'] ?? $existing->content_encoding ?? 'aesgcm',
+                'public_key' => $pubKey,
+                'auth_token' => $authToken,
+                'content_encoding' => $contentEncoding,
             ]);
-
-            return $existing;
-        }
-
-        return self::create([
-            'endpoint_hash' => $hash,
-            'user_id' => $userId,
-            'endpoint' => $endpoint,
-            'public_key' => $data['keys']['p256dh'] ?? $data['public_key'] ?? null,
-            'auth_token' => $data['keys']['auth'] ?? $data['auth_token'] ?? null,
-            'content_encoding' => $data['content_encoding'] ?? 'aesgcm',
-        ]);
+        });
     }
 }

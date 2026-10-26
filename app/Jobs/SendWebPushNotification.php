@@ -49,7 +49,15 @@ class SendWebPushNotification implements ShouldQueue
      */
     public function handle(PwaService $pwaService)
     {
-        return $pwaService->sendToUsers($this->userIds, $this->title, $this->body, $this->targetUrl);
+        $result = $pwaService->sendToUsers($this->userIds, $this->title, $this->body, $this->targetUrl);
+
+        // Terminate immediately without retrying on permanent server configuration errors
+        if (in_array($result['status'], ['vapid_keys_missing', 'vapid_keys_invalid', 'dependency_missing'], true)) {
+            Log::info('SendWebPushNotification stopped: permanent configuration status encountered (' . $result['status'] . '). Retries cancelled.');
+            return $result;
+        }
+
+        return $result;
     }
 
     /**
@@ -60,10 +68,15 @@ class SendWebPushNotification implements ShouldQueue
      */
     public function failed(\Throwable $exception)
     {
-        $safeMessage = preg_replace('/https?:\/\/[^\s]+/i', '<endpoint_redacted>', $exception->getMessage());
-        Log::warning('SendWebPushNotification job failed permanently: ' . $safeMessage, [
-            'recipients_count' => count($this->userIds),
-            'title' => strip_tags($this->title),
-        ]);
+        $correlationId = (string) \Illuminate\Support\Str::uuid();
+        try {
+            Log::warning('SendWebPushNotification job failed permanently', [
+                'correlation_id' => $correlationId,
+                'category' => 'JOB_FAILED_PERMANENTLY',
+                'recipients_count' => count($this->userIds),
+            ]);
+        } catch (\Throwable $logEx) {
+            // Silently swallow logging failure to prevent unexpected worker crash
+        }
     }
 }

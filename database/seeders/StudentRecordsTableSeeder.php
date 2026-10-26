@@ -17,6 +17,10 @@ class StudentRecordsTableSeeder extends Seeder
      */
     public function run()
     {
+        if (app()->environment('production')) {
+            return;
+        }
+
         $this->createStudentRecord();
         $this->createManyStudentRecords(3);
     }

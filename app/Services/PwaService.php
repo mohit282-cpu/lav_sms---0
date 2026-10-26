@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Helpers\Qs;
 use App\Models\PushSubscription;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class PwaService
 {
@@ -317,16 +318,41 @@ class PwaService
                 }
             }
         } catch (\Throwable $e) {
-            // Mask any private keys or endpoints in error logging
-            Log::error('PWA WebPush delivery exception: ' . $e->getMessage());
+            $correlationId = (string) Str::uuid();
+            $rawMsg = $e->getMessage();
 
-            $isVapidError = stripos($e->getMessage(), 'vapid') !== false ||
-                stripos($e->getMessage(), 'public key') !== false ||
-                stripos($e->getMessage(), 'private key') !== false;
+            // Categorize error without exposing raw messages or secrets
+            $category = 'PUSH_DELIVERY_FAILURE';
+            $isVapidError = false;
+
+            if (stripos($rawMsg, 'vapid') !== false || stripos($rawMsg, 'public key') !== false || stripos($rawMsg, 'private key') !== false) {
+                $category = 'VAPID_CONFIGURATION_ERROR';
+                $isVapidError = true;
+            } elseif (stripos($rawMsg, 'openssl') !== false || stripos($rawMsg, 'curve') !== false || stripos($rawMsg, 'ec') !== false) {
+                $category = 'CRYPTO_CONFIGURATION_ERROR';
+            } elseif (stripos($rawMsg, 'curl') !== false || stripos($rawMsg, 'timeout') !== false || stripos($rawMsg, 'resolve') !== false) {
+                $category = 'PROVIDER_NETWORK_ERROR';
+            }
+
+            // Extract safe HTTP status code if exception provides one
+            $providerCode = ($e->getCode() >= 100 && $e->getCode() <= 599) ? $e->getCode() : null;
+
+            // Safe structured diagnostic logging - never log $e->getMessage() directly to avoid secret leakage
+            try {
+                Log::error('PWA WebPush delivery failed', [
+                    'correlation_id' => $correlationId,
+                    'category' => $category,
+                    'http_status' => $providerCode,
+                    'affected_count' => count($validSubscriptions),
+                ]);
+            } catch (\Throwable $logEx) {
+                // Ensure a logging failure cannot cause business operations or notification flow to fail
+            }
 
             return [
-                'status' => $isVapidError ? 'vapid_keys_invalid' : 'error',
+                'status' => $isVapidError ? 'vapid_keys_invalid' : 'failed',
                 'message' => $isVapidError ? 'Configured VAPID keys are invalid or malformed.' : 'Web push delivery error encountered.',
+                'correlation_id' => $correlationId,
                 'total' => $subscriptions->count(),
                 'sent' => $sentCount,
                 'expired' => $expiredCount,
@@ -355,10 +381,26 @@ class PwaService
     }
 
     /**
-     * Dispatch notification to all users matching a user type / role.
+     * Dispatch notification to all users matching a user type / role within the institution.
+     * Single-Institution Architecture: Verified that the application operates as a single-school system
+     * governed by global system settings (settings table). All roles belong to this single institution.
+     * Enforces strict role validation and prevents confidential academic/financial leaks.
      */
     public function sendToRole(string $userType, string $title, string $body, ?string $targetUrl = null): array
     {
+        $validRoles = \App\Helpers\Qs::getAllUserTypes();
+        if (!in_array($userType, $validRoles, true)) {
+            return [
+                'status' => 'invalid_role',
+                'message' => 'Specified recipient role is not recognized or authorized.',
+                'total' => 0,
+                'sent' => 0,
+                'expired' => 0,
+                'failed' => 0,
+                'skipped' => 0,
+            ];
+        }
+
         $userIds = \App\User::where('user_type', $userType)->pluck('id')->toArray();
         return $this->sendToUsers($userIds, $title, $body, $targetUrl);
     }

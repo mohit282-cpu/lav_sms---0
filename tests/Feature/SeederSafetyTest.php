@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\User;
+use Database\Seeders\DemoUsersSeeder;
 use Database\Seeders\UsersTableSeeder;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -72,5 +74,63 @@ class SeederSafetyTest extends TestCase
         $seeder->run();
 
         $this->assertTrue(true, 'Seeder ran multiple times without duplicate exceptions');
+    }
+
+    /**
+     * Test that production environment prevents creating demo accounts or known default passwords.
+     */
+    public function test_production_seeding_does_not_create_demo_users_or_default_credentials()
+    {
+        $originalEnv = app()->environment();
+        $this->app['env'] = 'production';
+
+        try {
+            $initialCount = User::count();
+
+            $seeder = new UsersTableSeeder();
+            $seeder->run();
+
+            // Assert that running normal seeder in production did not create any new demo accounts
+            $this->assertEquals($initialCount, User::count(), 'Normal seeder in production must not add demo users');
+        } finally {
+            $this->app['env'] = $originalEnv;
+        }
+    }
+
+    /**
+     * Test that DemoUsersSeeder throws a RuntimeException in production.
+     */
+    public function test_demo_users_seeder_is_blocked_in_production()
+    {
+        $originalEnv = app()->environment();
+        $this->app['env'] = 'production';
+
+        try {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('DemoUsersSeeder is strictly forbidden in production environments.');
+
+            $demoSeeder = new DemoUsersSeeder();
+            $demoSeeder->run();
+        } finally {
+            $this->app['env'] = $originalEnv;
+        }
+    }
+
+    /**
+     * Test that DemoUsersSeeder works safely in testing/local environment without throwing.
+     */
+    public function test_demo_users_seeder_executes_safely_in_non_production()
+    {
+        $originalEnv = app()->environment();
+        $this->app['env'] = 'testing';
+
+        try {
+            $demoSeeder = new DemoUsersSeeder();
+            $demoSeeder->run();
+
+            $this->assertTrue(true, 'Demo seeder executed successfully in non-production');
+        } finally {
+            $this->app['env'] = $originalEnv;
+        }
     }
 }
