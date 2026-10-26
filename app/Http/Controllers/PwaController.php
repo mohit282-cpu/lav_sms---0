@@ -119,13 +119,26 @@ class PwaController extends Controller
      */
     public function vapidPublicKey(): JsonResponse
     {
-        $publicKey = config('services.pwa.vapid_public_key') ?: env('VAPID_PUBLIC_KEY');
+        $publicKey = config('services.pwa.vapid_public_key');
+
+        if (empty($publicKey)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'VAPID public key is not configured on the server.',
+                'vapid_public_key' => null,
+                'is_configured' => false,
+            ], 503)
+            ->header('Content-Type', 'application/json; charset=utf-8')
+            ->header('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
 
         return response()->json([
             'status' => 'success',
             'vapid_public_key' => $publicKey,
-            'is_configured' => !empty($publicKey),
-        ]);
+            'is_configured' => true,
+        ])
+        ->header('Content-Type', 'application/json; charset=utf-8')
+        ->header('Cache-Control', 'no-cache, no-store, must-revalidate');
     }
 
     /**
@@ -146,8 +159,8 @@ class PwaController extends Controller
         }
 
         // 2. Ensure VAPID keys are configured
-        $vapidPublic = config('services.pwa.vapid_public_key') ?: env('VAPID_PUBLIC_KEY');
-        $vapidPrivate = config('services.pwa.vapid_private_key') ?: env('VAPID_PRIVATE_KEY');
+        $vapidPublic = config('services.pwa.vapid_public_key');
+        $vapidPrivate = config('services.pwa.vapid_private_key');
         if (empty($vapidPublic) || empty($vapidPrivate)) {
             return response()->json([
                 'status' => 'vapid_keys_missing',

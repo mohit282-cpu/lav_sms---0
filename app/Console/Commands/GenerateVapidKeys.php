@@ -18,7 +18,8 @@ class GenerateVapidKeys extends Command
     protected $signature = 'pwa:vapid
                             {--show : Display the currently configured VAPID public key and subject}
                             {--show-secret : Explicitly display the generated private key in terminal output}
-                            {--save : Automatically update the .env file with generated keys}';
+                            {--save : Automatically update the .env file with generated keys}
+                            {--force : Overwrite existing VAPID keys in .env}';
 
     /**
      * The console command description.
@@ -46,7 +47,31 @@ class GenerateVapidKeys extends Command
             $this->line('VAPID Private Key: ' . ($privateKey ? '<Configured>' : '<Not Configured>'));
             $this->line('VAPID Subject:     ' . ($subject ?: '<Not Configured>'));
 
+            if (app()->configurationIsCached()) {
+                $this->comment('Note: Application configuration is currently cached.');
+            }
+
             return 0;
+        }
+
+        $envPath = base_path('.env');
+        $envExists = file_exists($envPath);
+        $existingPublicKey = config('services.pwa.vapid_public_key');
+        $existingPrivateKey = config('services.pwa.vapid_private_key');
+
+        if ($envExists && !$this->option('force')) {
+            $envContent = file_get_contents($envPath);
+            $hasEnvPub = preg_match('/^VAPID_PUBLIC_KEY=(.+)$/m', $envContent, $pubMatches);
+            $hasEnvPriv = preg_match('/^VAPID_PRIVATE_KEY=(.+)$/m', $envContent, $privMatches);
+
+            if (($existingPublicKey || ($hasEnvPub && !empty(trim($pubMatches[1])))) && ($existingPrivateKey || ($hasEnvPriv && !empty(trim($privMatches[1]))))) {
+                if ($this->option('save')) {
+                    $this->warn('VAPID keys are already configured in your environment.');
+                    $this->comment('Overwriting keys will invalidate existing browser push subscriptions.');
+                    $this->comment('Use --force to overwrite existing keys: php artisan pwa:vapid --save --force');
+                    return 0;
+                }
+            }
         }
 
         try {
@@ -74,8 +99,7 @@ class GenerateVapidKeys extends Command
         $this->newLine();
 
         if ($this->option('save')) {
-            $envPath = base_path('.env');
-            if (!file_exists($envPath)) {
+            if (!$envExists) {
                 $this->error('.env file not found. Please create it first.');
                 return 1;
             }
@@ -99,6 +123,11 @@ class GenerateVapidKeys extends Command
             // Restrict permissions on platforms that support POSIX permissions
             if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN' && function_exists('chmod')) {
                 @chmod($envPath, 0600);
+            }
+
+            if (app()->configurationIsCached()) {
+                \Illuminate\Support\Facades\Artisan::call('config:clear');
+                $this->info('✓ Laravel configuration cache cleared to load new keys.');
             }
 
             $this->info('✓ VAPID keys securely saved to .env file without echoing private key material.');

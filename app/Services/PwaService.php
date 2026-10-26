@@ -224,15 +224,15 @@ class PwaService
         }
 
         // Check if VAPID keys are configured
-        $vapidPublic = config('services.pwa.vapid_public_key') ?: env('VAPID_PUBLIC_KEY');
-        $vapidPrivate = config('services.pwa.vapid_private_key') ?: env('VAPID_PRIVATE_KEY');
-        $vapidSubject = config('services.pwa.vapid_subject') ?: env('VAPID_SUBJECT', config('app.url', 'http://localhost'));
+        $vapidPublic = config('services.pwa.vapid_public_key');
+        $vapidPrivate = config('services.pwa.vapid_private_key');
+        $vapidSubject = config('services.pwa.vapid_subject');
 
         if (!$vapidPublic || !$vapidPrivate) {
-            Log::info("PWA Push notification skipped: VAPID keys not configured in environment. Title: {$title}");
+            Log::info("PWA Push notification skipped: VAPID keys not configured in server configuration. Title: {$title}");
             return [
                 'status' => 'vapid_keys_missing',
-                'message' => 'VAPID keys not configured in server environment.',
+                'message' => 'VAPID keys not configured in server configuration.',
                 'total' => $subscriptions->count(),
                 'sent' => 0,
                 'expired' => 0,
@@ -516,5 +516,23 @@ class PwaService
                 }
             }
         }
+    }
+
+    /**
+     * Check if VAPID keys are configured on the server.
+     */
+    public function isPushConfigured(): bool
+    {
+        $public = config('services.pwa.vapid_public_key');
+        $private = config('services.pwa.vapid_private_key');
+        return !empty($public) && !empty($private);
+    }
+
+    /**
+     * Get the configured VAPID public key.
+     */
+    public function getVapidPublicKey(): ?string
+    {
+        return config('services.pwa.vapid_public_key');
     }
 }

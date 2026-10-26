@@ -39,7 +39,7 @@ return [
     'pwa' => [
         'vapid_public_key' => env('VAPID_PUBLIC_KEY'),
         'vapid_private_key' => env('VAPID_PRIVATE_KEY'),
-        'vapid_subject' => env('VAPID_SUBJECT', env('APP_URL', 'http://localhost')),
+        'vapid_subject' => env('VAPID_SUBJECT', env('MAIL_FROM_ADDRESS') ? 'mailto:' . env('MAIL_FROM_ADDRESS') : (env('APP_URL') ?: 'http://localhost')),
     ],
 
 ];

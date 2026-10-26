@@ -364,62 +364,130 @@
                 return reg.pushManager.getSubscription();
             });
         },
+        getPublicKey: function () {
+            if (window.PWA_VAPID_PUBLIC_KEY && typeof window.PWA_VAPID_PUBLIC_KEY === 'string' && window.PWA_VAPID_PUBLIC_KEY.trim() !== '') {
+                return Promise.resolve(window.PWA_VAPID_PUBLIC_KEY.trim());
+            }
+
+            var endpoint = window.PWA_VAPID_PUBLIC_KEY_URL || './pwa/push/vapid-key';
+            return fetch(endpoint, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+                cache: 'no-cache'
+            }).then(function (res) {
+                return res.text().then(function (text) {
+                    var data = {};
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        data = { status: 'error', message: 'Failed to parse VAPID public key response.' };
+                    }
+
+                    if (!res.ok || !data.vapid_public_key) {
+                        throw new Error(data.message || 'VAPID public key is not configured on the server.');
+                    }
+
+                    window.PWA_VAPID_PUBLIC_KEY = data.vapid_public_key;
+                    return data.vapid_public_key;
+                });
+            });
+        },
         subscribe: function (publicKey, subscribeUrl) {
             if (!this.isSupported()) {
                 return Promise.reject(new Error('Push notifications not supported on this browser.'));
             }
 
-            var key = publicKey || window.PWA_VAPID_PUBLIC_KEY;
-            if (!key) {
-                return Promise.reject(new Error('VAPID public key is not configured on the server.'));
-            }
+            var self = this;
+            var keyPromise = (publicKey && typeof publicKey === 'string' && publicKey.trim() !== '')
+                ? Promise.resolve(publicKey.trim())
+                : self.getPublicKey();
 
-            return Notification.requestPermission().then(function (permission) {
-                if (permission !== 'granted') {
-                    throw new Error('Notification permission was ' + permission);
+            return keyPromise.then(function (key) {
+                if (!key) {
+                    throw new Error('VAPID public key is not configured on the server.');
                 }
 
-                return navigator.serviceWorker.ready;
-            }).then(function (reg) {
-                var convertedKey = urlBase64ToUint8Array(key);
-                return reg.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: convertedKey
-                });
-            }).then(function (subscription) {
-                var csrf = document.querySelector('meta[name="csrf-token"]') ?
-                    document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
+                return Notification.requestPermission().then(function (permission) {
+                    if (permission !== 'granted') {
+                        throw new Error('Notification permission was ' + permission);
+                    }
 
-                var subJson = subscription.toJSON();
-                var payload = {
-                    endpoint: subscription.endpoint,
-                    keys: {
-                        p256dh: subJson.keys ? subJson.keys.p256dh : '',
-                        auth: subJson.keys ? subJson.keys.auth : ''
-                    },
-                    content_encoding: 'aesgcm'
-                };
+                    return navigator.serviceWorker.ready;
+                }).then(function (reg) {
+                    var convertedKey = urlBase64ToUint8Array(key);
 
-                return fetch(subscribeUrl || window.PWA_PUSH_SUBSCRIBE_URL || './pwa/push/subscribe', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': csrf,
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                }).then(function (res) {
-                    return res.text().then(function (text) {
-                        var data = {};
-                        try {
-                            data = JSON.parse(text);
-                        } catch (e) {
-                            data = { status: 'error', message: 'Unexpected server response (HTTP ' + res.status + ')' };
+                    return reg.pushManager.getSubscription().then(function (existingSub) {
+                        if (existingSub) {
+                            var keyMatches = false;
+                            try {
+                                if (existingSub.options && existingSub.options.applicationServerKey) {
+                                    var existingKey = new Uint8Array(existingSub.options.applicationServerKey);
+                                    if (existingKey.length === convertedKey.length) {
+                                        keyMatches = true;
+                                        for (var i = 0; i < existingKey.length; i++) {
+                                            if (existingKey[i] !== convertedKey[i]) {
+                                                keyMatches = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e) {
+                                keyMatches = false;
+                            }
+
+                            if (keyMatches) {
+                                return existingSub;
+                            }
+
+                            return existingSub.unsubscribe().then(function () {
+                                return reg.pushManager.subscribe({
+                                    userVisibleOnly: true,
+                                    applicationServerKey: convertedKey
+                                });
+                            });
                         }
-                        if (!res.ok) {
-                            throw new Error(data.message || 'Server rejected push subscription (HTTP ' + res.status + ')');
-                        }
-                        return data;
+
+                        return reg.pushManager.subscribe({
+                            userVisibleOnly: true,
+                            applicationServerKey: convertedKey
+                        });
+                    });
+                }).then(function (subscription) {
+                    var csrf = document.querySelector('meta[name="csrf-token"]') ?
+                        document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
+
+                    var subJson = subscription.toJSON();
+                    var payload = {
+                        endpoint: subscription.endpoint,
+                        keys: {
+                            p256dh: subJson.keys ? subJson.keys.p256dh : '',
+                            auth: subJson.keys ? subJson.keys.auth : ''
+                        },
+                        content_encoding: 'aesgcm'
+                    };
+
+                    return fetch(subscribeUrl || window.PWA_PUSH_SUBSCRIBE_URL || './pwa/push/subscribe', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrf,
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    }).then(function (res) {
+                        return res.text().then(function (text) {
+                            var data = {};
+                            try {
+                                data = JSON.parse(text);
+                            } catch (e) {
+                                data = { status: 'error', message: 'Unexpected server response (HTTP ' + res.status + ')' };
+                            }
+                            if (!res.ok) {
+                                throw new Error(data.message || 'Server rejected push subscription (HTTP ' + res.status + ')');
+                            }
+                            return data;
+                        });
                     });
                 });
             });
@@ -701,9 +769,17 @@
     };
 
     function urlBase64ToUint8Array(base64String) {
+        if (!base64String || typeof base64String !== 'string') {
+            throw new Error('Invalid VAPID public key string.');
+        }
         var padding = '===='.slice(0, (4 - base64String.length % 4) % 4);
         var base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
-        var rawData = window.atob(base64);
+        var rawData;
+        try {
+            rawData = window.atob(base64);
+        } catch (e) {
+            throw new Error('Failed to decode VAPID public key: invalid base64 encoding.');
+        }
         var outputArray = new Uint8Array(rawData.length);
         for (var i = 0; i < rawData.length; ++i) {
             outputArray[i] = rawData.charCodeAt(i);
