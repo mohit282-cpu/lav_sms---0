@@ -60,9 +60,10 @@ class SendWebPushNotification implements ShouldQueue
      */
     public function failed(\Throwable $exception)
     {
-        Log::warning('SendWebPushNotification job failed permanently: ' . $exception->getMessage(), [
+        $safeMessage = preg_replace('/https?:\/\/[^\s]+/i', '<endpoint_redacted>', $exception->getMessage());
+        Log::warning('SendWebPushNotification job failed permanently: ' . $safeMessage, [
             'recipients_count' => count($this->userIds),
-            'title' => $this->title,
+            'title' => strip_tags($this->title),
         ]);
     }
 }

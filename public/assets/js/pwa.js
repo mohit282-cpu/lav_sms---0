@@ -409,12 +409,18 @@
                     },
                     body: JSON.stringify(payload)
                 }).then(function (res) {
-                    if (!res.ok) {
-                        return res.json().then(function (err) {
-                            throw new Error(err.message || 'Server rejected push subscription');
-                        });
-                    }
-                    return res.json();
+                    return res.text().then(function (text) {
+                        var data = {};
+                        try {
+                            data = JSON.parse(text);
+                        } catch (e) {
+                            data = { status: 'error', message: 'Unexpected server response (HTTP ' + res.status + ')' };
+                        }
+                        if (!res.ok) {
+                            throw new Error(data.message || 'Server rejected push subscription (HTTP ' + res.status + ')');
+                        }
+                        return data;
+                    });
                 });
             });
         },
@@ -439,6 +445,16 @@
                             'Accept': 'application/json'
                         },
                         body: JSON.stringify({ endpoint: endpoint })
+                    }).then(function (res) {
+                        return res.text().then(function (text) {
+                            var data = {};
+                            try {
+                                data = JSON.parse(text);
+                            } catch (e) {
+                                data = { status: 'error', message: 'HTTP ' + res.status };
+                            }
+                            return data;
+                        });
                     });
                 });
             });
@@ -455,7 +471,17 @@
                     'Accept': 'application/json'
                 }
             }).then(function (res) {
-                return res.json();
+                return res.text().then(function (text) {
+                    var data = {};
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        data = { status: 'error', message: 'Unexpected server response (HTTP ' + res.status + ')' };
+                    }
+                    data.http_ok = res.ok;
+                    data.http_status = res.status;
+                    return data;
+                });
             });
         }
     };
@@ -515,14 +541,20 @@
                         btnTest.disabled = false;
                         btnTest.innerHTML = '<i class="icon-paperplane mr-1"></i> Send Test Notification';
                         if (res && res.status === 'success') {
-                            alert('Test notification sent! Check your device notifications.');
+                            alert('Test notification accepted by push service! Check your device notifications.');
+                        } else if (res && res.http_status === 429) {
+                            alert('Rate limit exceeded: Please wait a moment before sending another test notification.');
+                        } else if (res && res.status === 'no_subscriptions') {
+                            alert('No active push subscriptions found on this device. Please enable notifications first.');
+                        } else if (res && res.status === 'vapid_keys_missing') {
+                            alert('VAPID keys not configured on server.');
                         } else {
-                            alert('Test notification: ' + (res.message || 'Failed'));
+                            alert('Test notification: ' + (res.message || 'Delivery could not be completed.'));
                         }
                     }).catch(function (err) {
                         btnTest.disabled = false;
                         btnTest.innerHTML = '<i class="icon-paperplane mr-1"></i> Send Test Notification';
-                        alert('Error sending test notification: ' + err.message);
+                        alert('Error sending test notification: ' + (err.message || 'Network error'));
                     });
                 });
             }

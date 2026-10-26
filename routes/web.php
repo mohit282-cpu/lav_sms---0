@@ -15,10 +15,10 @@ Route::get('/sw.js', 'PwaController@serviceWorker')->name('pwa.sw');
 
 Route::group(['middleware' => ['auth', 'no_store']], function () {
     /* PWA Push Subscription Endpoints */
-    Route::post('/pwa/push/subscribe', 'PwaController@subscribe')->name('pwa.push.subscribe');
-    Route::post('/pwa/push/unsubscribe', 'PwaController@unsubscribe')->name('pwa.push.unsubscribe');
+    Route::post('/pwa/push/subscribe', 'PwaController@subscribe')->name('pwa.push.subscribe')->middleware('throttle:30,1');
+    Route::post('/pwa/push/unsubscribe', 'PwaController@unsubscribe')->name('pwa.push.unsubscribe')->middleware('throttle:30,1');
     Route::get('/pwa/push/vapid-key', 'PwaController@vapidPublicKey')->name('pwa.push.vapid');
-    Route::post('/pwa/push/test', 'PwaController@sendTestPush')->name('pwa.push.test');
+    Route::post('/pwa/push/test', 'PwaController@sendTestPush')->name('pwa.push.test')->middleware('throttle:6,1');
 
 
     Route::get('/', 'HomeController@dashboard')->name('home');

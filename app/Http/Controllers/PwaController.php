@@ -128,21 +128,60 @@ class PwaController extends Controller
     }
 
     /**
-     * Send a safe test notification to the authenticated user
+     * Send a safe test notification to the authenticated user.
+     * Hardened against arbitrary recipient/payload injection and verifies subscriptions and VAPID.
      */
     public function sendTestPush(Request $request): JsonResponse
     {
+        $userId = Auth::id();
+
+        // 1. Ensure user has registered subscriptions
+        $hasSubscriptions = PushSubscription::where('user_id', $userId)->exists();
+        if (!$hasSubscriptions) {
+            return response()->json([
+                'status' => 'no_subscriptions',
+                'message' => 'No registered devices found for your account. Please enable notifications on this device first.',
+            ], 422);
+        }
+
+        // 2. Ensure VAPID keys are configured
+        $vapidPublic = config('services.pwa.vapid_public_key') ?: env('VAPID_PUBLIC_KEY');
+        $vapidPrivate = config('services.pwa.vapid_private_key') ?: env('VAPID_PRIVATE_KEY');
+        if (empty($vapidPublic) || empty($vapidPrivate)) {
+            return response()->json([
+                'status' => 'vapid_keys_missing',
+                'message' => 'Server VAPID keys are not configured. Notifications cannot be delivered.',
+            ], 422);
+        }
+
+        // 3. Send test notification strictly to authenticated user with immutable parameters
         $result = $this->pwaService->sendNotification(
-            Auth::id(),
+            $userId,
             'Test Notification',
             'Web push notifications are configured and functioning correctly.',
             route('dashboard')
         );
 
+        if ($result['status'] === 'success') {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Test notification accepted by push service for delivery.',
+                'result' => $result,
+            ], 200);
+        }
+
+        if ($result['status'] === 'partial') {
+            return response()->json([
+                'status' => 'partial',
+                'message' => 'Test notification delivered to some registered devices, but others failed or expired.',
+                'result' => $result,
+            ], 200);
+        }
+
         return response()->json([
-            'status' => 'success',
-            'message' => 'Test notification processed',
+            'status' => 'failed',
+            'message' => $result['message'] ?? 'Failed to deliver test notification to registered devices.',
             'result' => $result,
-        ]);
+        ], 502);
     }
 }

@@ -11,39 +11,24 @@ use Tests\TestCase;
 class LocalizationTest extends TestCase
 {
     /**
-     * Test that the default locale for new sessions is Nepali ('ne').
+     * Test that the default locale for new sessions is English ('en').
      */
-    public function testDefaultLocaleIsNepali()
+    public function testDefaultLocaleIsEnglish()
     {
         $response = $this->get('/login');
 
         $response->assertStatus(200);
-        $this->assertEquals('ne', app()->getLocale());
-        $response->assertSee('नेपाली');
-        $response->assertSee('आफ्नो खातामा लगइन गर्नुहोस्');
+        $this->assertEquals('en', app()->getLocale());
+        $response->assertSee('English');
+        $response->assertSee('Login to your account');
     }
 
     /**
-     * Test that user can switch language to English.
+     * Test that user can switch language to Nepali.
      */
-    public function testCanSwitchLocaleToEnglish()
+    public function testCanSwitchLocaleToNepali()
     {
-        $response = $this->get(route('set_locale', 'en'));
-
-        $response->assertStatus(302);
-        $response->assertSessionHas('locale', 'en');
-
-        $page = $this->withSession(['locale' => 'en'])->get('/login');
-        $page->assertStatus(200);
-        $page->assertSee('Login to your account');
-    }
-
-    /**
-     * Test that user can switch language back to Nepali.
-     */
-    public function testCanSwitchLocaleBackToNepali()
-    {
-        $response = $this->withSession(['locale' => 'en'])->get(route('set_locale', 'ne'));
+        $response = $this->get(route('set_locale', 'ne'));
 
         $response->assertStatus(302);
         $response->assertSessionHas('locale', 'ne');
@@ -54,15 +39,30 @@ class LocalizationTest extends TestCase
     }
 
     /**
+     * Test that user can switch language back to English.
+     */
+    public function testCanSwitchLocaleBackToEnglish()
+    {
+        $response = $this->withSession(['locale' => 'ne'])->get(route('set_locale', 'en'));
+
+        $response->assertStatus(302);
+        $response->assertSessionHas('locale', 'en');
+
+        $page = $this->withSession(['locale' => 'en'])->get('/login');
+        $page->assertStatus(200);
+        $page->assertSee('Login to your account');
+    }
+
+    /**
      * Test that unsupported locales are safely rejected.
      */
     public function testUnsupportedLocaleIsRejectedSafely()
     {
-        $response = $this->withSession(['locale' => 'ne'])->get(route('set_locale', 'fr'));
+        $response = $this->withSession(['locale' => 'en'])->get(route('set_locale', 'fr'));
 
         $response->assertStatus(302);
-        // Session locale should remain 'ne' and not 'fr'
-        $response->assertSessionHas('locale', 'ne');
+        // Session locale should remain 'en' and not 'fr'
+        $response->assertSessionHas('locale', 'en');
     }
 
     /**

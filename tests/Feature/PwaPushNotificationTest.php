@@ -333,4 +333,216 @@ class PwaPushNotificationTest extends TestCase
         $response->assertSee('pwa-btn-disable-push');
         $response->assertSee('pwa-btn-test-push');
     }
+
+    /**
+     * Test PwaService::sanitizeTargetUrl against various bypasses and malicious vectors
+     */
+    public function test_sanitize_target_url_matrix()
+    {
+        $service = app(PwaService::class);
+        $fallback = route('dashboard');
+
+        // Valid relative paths
+        $this->assertEquals('/dashboard', $service->sanitizeTargetUrl('/dashboard'));
+        $this->assertEquals('/my_account', $service->sanitizeTargetUrl('/my_account'));
+        $this->assertEquals('./dashboard', $service->sanitizeTargetUrl('./dashboard'));
+
+        // Valid same-origin absolute URL
+        $validOriginUrl = url('/dashboard');
+        $this->assertEquals($validOriginUrl, $service->sanitizeTargetUrl($validOriginUrl));
+
+        // Protocol-relative URLs must be rejected
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('//evil.example.com/phish'));
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('//google.com'));
+
+        // Backslash-based bypass tricks must be rejected
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('/\\evil.example.com'));
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('\\\\evil.example.com'));
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('/dashboard\\evil'));
+
+        // Dangerous schemes must be rejected
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('javascript:alert(document.cookie)'));
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('data:text/html,<script>alert(1)</script>'));
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('vbscript:msgbox("pwnd")'));
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('file:///etc/passwd'));
+
+        // Control characters and newlines must be rejected
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl("/dashboard\r\nSet-Cookie: evil=1"));
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl("/dashboard\x00evil"));
+
+        // External absolute URLs must be rejected
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('https://evil.example.com/login'));
+
+        // Port mismatch must be rejected
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl('http://localhost:9999/dashboard'));
+
+        // Empty or null returns fallback
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl(null));
+        $this->assertEquals($fallback, $service->sanitizeTargetUrl(''));
+    }
+
+    /**
+     * Test artisan pwa:vapid --show strictly conceals the private key
+     */
+    public function test_artisan_vapid_show_does_not_leak_private_key()
+    {
+        $secretKey = 'SuperSecretVapidPrivateKeyMaterial1234567890';
+        Config::set('services.pwa.vapid_public_key', 'PublicVapidKeyExample');
+        Config::set('services.pwa.vapid_private_key', $secretKey);
+        Config::set('services.pwa.vapid_subject', 'mailto:admin@example.com');
+
+        $this->artisan('pwa:vapid', ['--show' => true])
+            ->expectsOutput('=== Current PWA VAPID Configuration ===')
+            ->expectsOutput('VAPID Public Key:  PublicVapidKeyExample')
+            ->expectsOutput('VAPID Private Key: <Configured>')
+            ->expectsOutput('VAPID Subject:     mailto:admin@example.com')
+            ->doesntExpectOutput($secretKey)
+            ->doesntExpectOutput(substr($secretKey, 0, 4) . '...' . substr($secretKey, -4))
+            ->assertExitCode(0);
+    }
+
+    /**
+     * Test that sendTestPush endpoint rejects requests if user has no subscriptions
+     */
+    public function test_test_push_endpoint_requires_registered_subscription()
+    {
+        $this->actingAs($this->admin);
+
+        // Ensure admin has no subscriptions
+        PushSubscription::where('user_id', $this->admin->id)->delete();
+
+        $res = $this->postJson(route('pwa.push.test'));
+        $res->assertStatus(422);
+        $res->assertJson([
+            'status' => 'no_subscriptions',
+        ]);
+    }
+
+    /**
+     * Test that sendTestPush endpoint ignores arbitrary client parameters and enforces immutable payload
+     */
+    public function test_test_push_endpoint_ignores_arbitrary_client_parameters()
+    {
+        $this->actingAs($this->admin);
+
+        // Register subscription for admin
+        PushSubscription::storeSubscription($this->admin->id, [
+            'endpoint' => 'https://fcm.googleapis.com/fcm/send/admin-fixed-test-' . time(),
+            'keys' => ['p256dh' => 'k1', 'auth' => 'a1'],
+        ]);
+
+        // Mock VAPID keys
+        Config::set('services.pwa.vapid_public_key', 'test-pub');
+        Config::set('services.pwa.vapid_private_key', 'test-priv');
+
+        // Supply arbitrary malicious parameters in request
+        $res = $this->postJson(route('pwa.push.test'), [
+            'user_id' => $this->student->id,
+            'title' => 'Malicious Injected Title',
+            'body' => 'Phishing text',
+            'url' => 'https://evil.example.com',
+        ]);
+
+        // Response must not accept arbitrary recipient or URL
+        $this->assertTrue(in_array($res->status(), [200, 502]));
+        $this->assertNotEquals('Malicious Injected Title', $res->json('result.title') ?? '');
+    }
+
+    /**
+     * Test test push route rate limiting (6 requests per minute)
+     */
+    public function test_test_push_endpoint_rate_limiting()
+    {
+        $this->actingAs($this->admin);
+
+        PushSubscription::storeSubscription($this->admin->id, [
+            'endpoint' => 'https://fcm.googleapis.com/fcm/send/admin-rate-limit-' . time(),
+            'keys' => ['p256dh' => 'k', 'auth' => 'a'],
+        ]);
+
+        Config::set('services.pwa.vapid_public_key', 'test-pub');
+        Config::set('services.pwa.vapid_private_key', 'test-priv');
+
+        for ($i = 0; $i < 6; $i++) {
+            $this->postJson(route('pwa.push.test'));
+        }
+
+        // The 7th request must trigger rate limit 429
+        $response = $this->postJson(route('pwa.push.test'));
+        $response->assertStatus(429);
+    }
+
+    /**
+     * Test delivery reporting accurate accounting for skipped, missing recipients, and no subscriptions
+     */
+    public function test_delivery_reporting_accounting()
+    {
+        $service = app(PwaService::class);
+
+        // 1. Empty recipients
+        $resNoRecipients = $service->sendToUsers([], 'Notice', 'Body');
+        $this->assertEquals('no_recipients', $resNoRecipients['status']);
+        $this->assertEquals(0, $resNoRecipients['total']);
+        $this->assertEquals(0, $resNoRecipients['skipped']);
+
+        // 2. User with no subscriptions
+        $resNoSubs = $service->sendToUsers([99999], 'Notice', 'Body');
+        $this->assertEquals('no_subscriptions', $resNoSubs['status']);
+        $this->assertEquals(0, $resNoSubs['total']);
+
+        // 3. Subscriptions missing keys are accounted in skippedCount
+        PushSubscription::create([
+            'endpoint_hash' => hash('sha256', 'https://fcm.googleapis.com/missing-keys'),
+            'user_id' => $this->admin->id,
+            'endpoint' => 'https://fcm.googleapis.com/missing-keys',
+            'public_key' => null,
+            'auth_token' => null,
+        ]);
+
+        Config::set('services.pwa.vapid_public_key', 'valid-pub');
+        Config::set('services.pwa.vapid_private_key', 'valid-priv');
+
+        $resWithMissingKey = $service->sendToUsers([$this->admin->id], 'Notice', 'Body');
+        $this->assertArrayHasKey('skipped', $resWithMissingKey);
+        $this->assertGreaterThanOrEqual(1, $resWithMissingKey['skipped']);
+        $this->assertEquals(
+            $resWithMissingKey['total'],
+            $resWithMissingKey['sent'] + $resWithMissingKey['expired'] + $resWithMissingKey['failed'] + $resWithMissingKey['skipped']
+        );
+    }
+
+    /**
+     * Test subscription re-assignment on shared browser safely updates user_id and logs audit
+     */
+    public function test_subscription_reassignment_on_shared_device()
+    {
+        $sharedEndpoint = 'https://fcm.googleapis.com/fcm/send/shared-device-' . time();
+
+        // 1. First user registers
+        $sub1 = PushSubscription::storeSubscription($this->student->id, [
+            'endpoint' => $sharedEndpoint,
+            'keys' => ['p256dh' => 'key-user1', 'auth' => 'auth-user1'],
+        ]);
+        $this->assertEquals($this->student->id, $sub1->user_id);
+
+        // 2. Second user logs into the same browser and registers the same endpoint
+        $sub2 = PushSubscription::storeSubscription($this->teacher->id, [
+            'endpoint' => $sharedEndpoint,
+            'keys' => ['p256dh' => 'key-user2', 'auth' => 'auth-user2'],
+        ]);
+
+        // Same record id, re-assigned to teacher, updated keys
+        $this->assertEquals($sub1->id, $sub2->id);
+        $this->assertEquals($this->teacher->id, $sub2->user_id);
+
+        // Database now has teacher as owner
+        $this->assertDatabaseHas('push_subscriptions', [
+            'id' => $sub1->id,
+            'user_id' => $this->teacher->id,
+        ]);
+        $this->assertDatabaseMissing('push_subscriptions', [
+            'id' => $sub1->id,
+            'user_id' => $this->student->id,
+        ]);
+    }
 }

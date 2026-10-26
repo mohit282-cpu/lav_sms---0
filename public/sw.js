@@ -345,9 +345,19 @@ self.addEventListener('notificationclick', (event) => {
     let targetUrl = './dashboard';
     if (event.notification.data && event.notification.data.url) {
         try {
-            const parsed = new URL(event.notification.data.url, self.location.origin);
-            if (parsed.origin === self.location.origin) {
-                targetUrl = parsed.pathname + parsed.search;
+            const raw = String(event.notification.data.url).trim();
+            // Reject control characters, newlines, backslashes, protocol-relative prefixes, and dangerous schemes
+            if (raw &&
+                !/[\x00-\x1F\x7F\r\n\\]/.test(raw) &&
+                !raw.startsWith('//') &&
+                !raw.startsWith('/\\') &&
+                !raw.startsWith('\\\\') &&
+                !/^(javascript|data|vbscript|file|about|blob):/i.test(raw)
+            ) {
+                const parsed = new URL(raw, self.location.origin);
+                if (parsed.origin === self.location.origin && (parsed.protocol === 'http:' || parsed.protocol === 'https:')) {
+                    targetUrl = parsed.pathname + parsed.search;
+                }
             }
         } catch (e) {
             targetUrl = './dashboard';

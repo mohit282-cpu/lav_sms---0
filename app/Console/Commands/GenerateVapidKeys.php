@@ -42,7 +42,7 @@ class GenerateVapidKeys extends Command
 
             $this->info('=== Current PWA VAPID Configuration ===');
             $this->line('VAPID Public Key:  ' . ($publicKey ?: '<Not Configured>'));
-            $this->line('VAPID Private Key: ' . ($privateKey ? substr($privateKey, 0, 4) . '...' . substr($privateKey, -4) : '<Not Configured>'));
+            $this->line('VAPID Private Key: ' . ($privateKey ? '<Configured>' : '<Not Configured>'));
             $this->line('VAPID Subject:     ' . ($subject ?: '<Not Configured>'));
 
             return 0;
@@ -60,6 +60,7 @@ class GenerateVapidKeys extends Command
         $defaultSubject = 'mailto:' . (config('mail.from.address') ?: 'admin@' . (parse_url(config('app.url'), PHP_URL_HOST) ?: 'localhost'));
 
         $this->info('=== Generated Web Push VAPID Keypair ===');
+        $this->warn('SECURITY WARNING: The VAPID private key is a sensitive secret. Never commit it to Git, share it publicly, or expose it in client-side code.');
         $this->line('<comment>VAPID_PUBLIC_KEY=</comment>' . $publicKey);
         $this->line('<comment>VAPID_PRIVATE_KEY=</comment>' . $privateKey);
         $this->line('<comment>VAPID_SUBJECT=</comment>' . $defaultSubject);

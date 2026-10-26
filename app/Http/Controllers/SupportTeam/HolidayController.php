@@ -58,15 +58,19 @@ class HolidayController extends Controller
             'created_by' => Auth::id(),
         ]);
 
-        $subscriberIds = \App\Models\PushSubscription::pluck('user_id')->unique()->toArray();
-        if (!empty($subscriberIds)) {
-            $eventTitle = (app()->getLocale() === 'ne' && $request->title_ne) ? $request->title_ne : $request->title;
-            \App\Jobs\SendWebPushNotification::dispatch(
-                $subscriberIds,
-                __('School Announcement'),
-                $eventTitle . " ({$request->start_date_bs} BS)",
-                route('dashboard')
-            );
+        try {
+            $subscriberIds = \App\Models\PushSubscription::pluck('user_id')->unique()->toArray();
+            if (!empty($subscriberIds)) {
+                $eventTitle = (app()->getLocale() === 'ne' && $request->title_ne) ? $request->title_ne : $request->title;
+                \App\Jobs\SendWebPushNotification::dispatch(
+                    $subscriberIds,
+                    __('School Announcement'),
+                    $eventTitle . " ({$request->start_date_bs} BS)",
+                    route('dashboard')
+                );
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('WebPush notification dispatch failed for holiday: ' . $e->getMessage());
         }
 
         return back()->with('flash_success', __('Holiday/Event saved successfully.'));

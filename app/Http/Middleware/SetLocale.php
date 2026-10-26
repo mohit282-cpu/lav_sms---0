@@ -46,9 +46,9 @@ class SetLocale
             }
         }
 
-        // 3. Default configured locale (Nepali 'ne')
+        // 3. Default configured locale (English 'en')
         if (!$locale) {
-            $locale = config('app.locale', 'ne');
+            $locale = config('app.locale', 'en');
             if ($request->hasSession()) {
                 $request->session()->put('locale', $locale);
             }

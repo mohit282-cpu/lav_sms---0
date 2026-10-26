@@ -91,13 +91,17 @@ class BookRequestController extends Controller
             $bookRequest = BookRequest::find((int) $targetId);
             $this->libraryService->approveRequest((int) $targetId, $req->get('notes'));
 
-            if ($bookRequest && $bookRequest->user_id) {
-                \App\Jobs\SendWebPushNotification::dispatch(
-                    $bookRequest->user_id,
-                    __('Library Update'),
-                    __('Your book request has been approved.'),
-                    route('book_requests.my_requests')
-                );
+            try {
+                if ($bookRequest && $bookRequest->user_id) {
+                    \App\Jobs\SendWebPushNotification::dispatch(
+                        $bookRequest->user_id,
+                        __('Library Update'),
+                        __('Your book request has been approved.'),
+                        route('book_requests.my_requests')
+                    );
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('WebPush notification dispatch failed for book approval: ' . $e->getMessage());
             }
 
             return back()->with('flash_success', __('Book request approved.'));
@@ -117,13 +121,17 @@ class BookRequestController extends Controller
             $bookRequest = BookRequest::find((int) $targetId);
             $this->libraryService->rejectRequest((int) $targetId, $req->get('notes'));
 
-            if ($bookRequest && $bookRequest->user_id) {
-                \App\Jobs\SendWebPushNotification::dispatch(
-                    $bookRequest->user_id,
-                    __('Library Update'),
-                    __('Your book request status has been updated.'),
-                    route('book_requests.my_requests')
-                );
+            try {
+                if ($bookRequest && $bookRequest->user_id) {
+                    \App\Jobs\SendWebPushNotification::dispatch(
+                        $bookRequest->user_id,
+                        __('Library Update'),
+                        __('Your book request status has been updated.'),
+                        route('book_requests.my_requests')
+                    );
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('WebPush notification dispatch failed for book rejection: ' . $e->getMessage());
             }
 
             return back()->with('flash_success', __('Book request rejected.'));
