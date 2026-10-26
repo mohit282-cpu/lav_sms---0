@@ -14,8 +14,8 @@ class PwaService
      */
     public function getManifest(): array
     {
-        $systemName = Qs::getSystemName() ?: config('app.name', 'School Management System');
-        $shortName = substr($systemName, 0, 15);
+        $systemName = Qs::getSystemName() ?: config('app.name', 'School Management System Academy');
+        $shortName = Qs::getSetting('system_title') ?: 'SMS Academy';
         $baseUrl = url('/');
         $basePath = parse_url($baseUrl, PHP_URL_PATH) ?: '';
         $startUrl = rtrim($baseUrl, '/') . '/';
@@ -23,7 +23,7 @@ class PwaService
 
         return [
             'name' => $systemName,
-            'short_name' => $shortName ?: 'SMS Nepal',
+            'short_name' => $shortName,
             'description' => 'Comprehensive localized School Management System for Nepal with offline readiness, attendance, and student tracking.',
             'start_url' => $startUrl,
             'scope' => $scope,
@@ -163,6 +163,7 @@ class PwaService
             asset('global_assets/images/favicon.png'),
             asset('assets/images/icons/icon-192x192.png'),
             asset('assets/images/icons/icon-512x512.png'),
+            asset('assets/images/icons/icon-maskable-512x512.png'),
         ];
     }
 

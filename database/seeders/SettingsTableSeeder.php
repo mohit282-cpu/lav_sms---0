@@ -13,17 +13,15 @@ class SettingsTableSeeder extends Seeder
      */
     public function run()
     {
-        DB::table('settings')->delete();
-
         $data = [
             ['type' => 'current_session', 'description' => '2018-2019'],
-            ['type' => 'system_title', 'description' => 'CJIA'],
-            ['type' => 'system_name', 'description' => 'CJ INSPIRED ACADEMY'],
+            ['type' => 'system_title', 'description' => 'SMS Academy'],
+            ['type' => 'system_name', 'description' => 'School Management System Academy'],
             ['type' => 'term_ends', 'description' => '7/10/2018'],
             ['type' => 'term_begins', 'description' => '7/10/2018'],
             ['type' => 'phone', 'description' => '0123456789'],
             ['type' => 'address', 'description' => '18B North Central Park, Behind Central Square Tourist Center'],
-            ['type' => 'system_email', 'description' => 'cjacademy@cj.com'],
+            ['type' => 'system_email', 'description' => 'smsacademy@sms.com'],
             ['type' => 'alt_email', 'description' => ''],
             ['type' => 'email_host', 'description' => ''],
             ['type' => 'email_pass', 'description' => ''],
@@ -37,7 +35,11 @@ class SettingsTableSeeder extends Seeder
             ['type' => 'next_term_fees_c', 'description' => '1600'],
         ];
 
-        DB::table('settings')->insert($data);
-
+        foreach ($data as $d) {
+            $exists = DB::table('settings')->where('type', $d['type'])->exists();
+            if (!$exists) {
+                DB::table('settings')->insert($d);
+            }
+        }
     }
 }

@@ -26,7 +26,7 @@ class Qs
 
     public static function getAppCode()
     {
-        return self::getSetting('system_title') ?: 'CJ';
+        return self::getSetting('system_title') ?: 'SMSA';
     }
 
     public static function getDefaultUserImage()
@@ -367,7 +367,12 @@ class Qs
 
     public static function getSystemName()
     {
-        return self::getSetting('system_name');
+        return self::getSetting('system_name') ?: 'School Management System Academy';
+    }
+
+    public static function getSystemTitle()
+    {
+        return self::getSetting('system_title') ?: 'SMS Academy';
     }
 
     public static function findMyChildren($parent_id)

@@ -36,7 +36,7 @@ class DemoUsersSeeder extends Seeder
 
         $demoUsers = [
             [
-                'name' => 'CJ Inspired',
+                'name' => 'SMS Super Admin',
                 'email' => 'cj@cj.com',
                 'username' => 'cj',
                 'password' => $defaultPassword,

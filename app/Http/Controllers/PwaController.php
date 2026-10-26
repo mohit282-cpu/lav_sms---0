@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\Qs;
 use App\Models\PushSubscription;
 use App\Services\PwaService;
 use Illuminate\Http\JsonResponse;
@@ -37,7 +38,7 @@ class PwaController extends Controller
     {
         return response()
             ->view('pages.pwa.offline', [
-                'systemName' => config('app.name', 'School Management System'),
+                'systemName' => Qs::getSystemName() ?: config('app.name', 'School Management System Academy'),
             ])
             ->header('Cache-Control', 'public, max-age=86400');
     }

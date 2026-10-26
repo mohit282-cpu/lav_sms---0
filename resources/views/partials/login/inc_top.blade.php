@@ -1,10 +1,13 @@
-{{-- PWA Meta and Manifest --}}
-<link rel="icon" href="{{ asset('global_assets/images/favicon.png') }}">
+{{-- Favicon and PWA Meta --}}
+<link rel="icon" type="image/png" sizes="512x512" href="{{ asset('assets/images/icons/icon-maskable-512x512.png') }}">
+<link rel="icon" type="image/png" sizes="192x192" href="{{ asset('assets/images/icons/icon-192x192.png') }}">
+<link rel="icon" type="image/png" sizes="32x32" href="{{ asset('global_assets/images/favicon.png') }}">
+<link rel="shortcut icon" href="{{ asset('assets/images/icons/icon-maskable-512x512.png') }}">
 <link rel="manifest" href="{{ route('pwa.manifest') }}">
 <meta name="theme-color" content="#1e2b37">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="{{ config('app.name', 'SMS Portal') }}">
+<meta name="apple-mobile-web-app-title" content="{{ Qs::getSystemTitle() ?: config('app.name', 'SMS Academy') }}">
 <link rel="apple-touch-icon" href="{{ asset('assets/images/icons/apple-touch-icon.png') }}">
 
 <!-- Global stylesheets -->

@@ -17,7 +17,7 @@
  *    confirms that no active form submissions or transactions are in-flight.
  */
 
-const CACHE_VERSION = 'lav-sms-v1.1.0';
+const CACHE_VERSION = 'lav-sms-v1.1.1';
 const CACHE_PREFIX = 'lav-sms-';
 const PRECACHE_NAME = `${CACHE_PREFIX}precache-${CACHE_VERSION}`;
 const RUNTIME_STATIC_CACHE = `${CACHE_PREFIX}static-${CACHE_VERSION}`;

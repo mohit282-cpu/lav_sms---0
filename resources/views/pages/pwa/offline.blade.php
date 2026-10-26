@@ -5,9 +5,12 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <meta name="theme-color" content="#1e2b37">
-    <title>{{ __('Offline Mode') }} | {{ config('app.name', 'School Management System') }}</title>
+    <title>{{ __('Offline Mode') }} | {{ Qs::getSystemName() ?: config('app.name', 'School Management System Academy') }}</title>
 
-    <link rel="icon" href="{{ asset('global_assets/images/favicon.png') }}">
+    <link rel="icon" type="image/png" sizes="512x512" href="{{ asset('assets/images/icons/icon-maskable-512x512.png') }}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('assets/images/icons/icon-192x192.png') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('global_assets/images/favicon.png') }}">
+    <link rel="shortcut icon" href="{{ asset('assets/images/icons/icon-maskable-512x512.png') }}">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <link href="{{ asset('assets/css/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ asset('assets/css/pwa.css') }}" rel="stylesheet">
@@ -127,7 +130,7 @@
             ● {{ __('Offline Mode / अफलाइन मोड') }}
         </span>
 
-        <h3 class="font-weight-bold mb-2">{{ config('app.name', 'School Management System') }}</h3>
+        <h3 class="font-weight-bold mb-2">{{ Qs::getSystemName() ?: config('app.name', 'School Management System Academy') }}</h3>
         <p class="text-muted">
             {{ __('You are currently disconnected from the internet. The portal has preserved your offline shell and cached resources.') }}
         </p>

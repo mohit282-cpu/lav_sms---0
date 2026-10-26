@@ -1,6 +1,6 @@
 {
-  "name": "CJ Inspired Academy",
-  "short_name": "SMS Nepal",
+  "name": "School Management System Academy",
+  "short_name": "SMS Academy",
   "description": "Comprehensive localized School Management System for Nepal with offline readiness, attendance, and student tracking.",
   "start_url": "./",
   "scope": "./",
